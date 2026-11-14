@@ -1,0 +1,26 @@
+version: 2
+
+models:
+  - name: int_trips_deduped
+    description: Trips in the run window, one row per surrogate trip_id (latest load wins).
+    columns:
+      - name: trip_id
+        description: "Surrogate key over vendor, pickup, dropoff, locations and fare."
+        tests:
+          - unique
+          - not_null
+  - name: int_trips_validated
+    description: Deduplicated trips with the first matching rejection reason, NULL when valid.
+    columns:
+      - name: rejection_reason
+        description: "First failed validation rule, NULL for valid trips."
+        tests:
+          - accepted_values:
+              values:
+                - negative_fare
+                - zero_distance_high_fare
+                - dropoff_before_pickup
+                - duration_over_6h
+                - pickup_outside_source_month
+  - name: int_trips_with_weather
+    description: Valid trips enriched with hourly weather at pickup.
