@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.superpowers/
+target/
+dbt_packages/
+logs/
+*.json.key
+**/gcp-key.json
+.env
+.astro/
+airflow/airflow_settings.yaml
+.DS_Store
