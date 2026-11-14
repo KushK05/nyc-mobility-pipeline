@@ -1,0 +1,28 @@
+version: 2
+
+seeds:
+  - name: taxi_zone_lookup
+    description: NYC TLC taxi zone lookup (one row per LocationID).
+    config:
+      column_types:
+        LocationID: int64
+    columns:
+      - name: LocationID
+        description: TLC zone identifier.
+      - name: Borough
+        description: Borough name.
+      - name: Zone
+        description: Zone name.
+      - name: service_zone
+        description: TLC service zone.
+
+  - name: us_holidays
+    description: US federal holidays for 2024.
+    config:
+      column_types:
+        holiday_date: date
+    columns:
+      - name: holiday_date
+        description: Date of the holiday.
+      - name: holiday_name
+        description: Name of the holiday.
