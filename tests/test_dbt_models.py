@@ -68,3 +68,25 @@ def test_marts_yml_has_required_tests():
     assert cfg("trip_duration_min", "dbt_utils.accepted_range")["max_value"] == 360
     for name in ["fct_trips", "agg_hourly_zone_demand", "agg_daily_weather_impact"]:
         assert all(c.get("description") for c in models[name]["columns"]), name
+
+
+def test_fct_trips_tests_have_partition_where():
+    import yaml
+
+    doc = yaml.safe_load((MARTS / "_marts.yml").read_text())
+    fct = next(m for m in doc["models"] if m["name"] == "fct_trips")
+    count = 0
+    for col in fct["columns"]:
+        for t in col.get("tests", []):
+            assert isinstance(t, dict), (col["name"], t)
+            body = next(iter(t.values())) or {}
+            where = body["config"]["where"]
+            assert "pickup_date between" in where and "run_month_start" in where
+            count += 1
+    assert count == 7
+
+
+def test_quarantine_trips_is_incremental_insert_overwrite():
+    text = (MARTS / "quarantine_trips.sql").read_text()
+    assert "insert_overwrite" in text
+    assert "require_partition_filter" not in text

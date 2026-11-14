@@ -7,8 +7,12 @@ models:
       - name: trip_id
         description: "Surrogate key over vendor, pickup, dropoff, locations and fare."
         tests:
-          - unique
-          - not_null
+          - unique:
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
+          - not_null:
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
       - name: vendor_id
         description: "TLC vendor code."
       - name: pickup_datetime
@@ -25,12 +29,16 @@ models:
           - relationships:
               to: ref('dim_zone')
               field: location_id
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
       - name: do_location_id
         description: "Dropoff taxi zone id, joins to dim_zone.location_id."
         tests:
           - relationships:
               to: ref('dim_zone')
               field: location_id
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
       - name: passenger_count
         description: "Number of passengers reported by the driver."
       - name: trip_distance
@@ -41,17 +49,23 @@ models:
           - dbt_utils.accepted_range:
               min_value: 0
               max_value: 360
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
       - name: payment_type
         description: "Payment type code (1 card, 2 cash, 3 no charge, 4 dispute, 5 unknown, 6 voided)."
         tests:
           - accepted_values:
               values: [1, 2, 3, 4, 5, 6]
               quote: false
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
       - name: fare_amount
         description: "Metered time-and-distance fare in USD."
         tests:
           - dbt_utils.accepted_range:
               min_value: 0
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
       - name: tip_amount
         description: "Tip in USD (card payments only)."
       - name: tolls_amount
@@ -160,7 +174,7 @@ models:
         description: "Borough of the pickup zone."
 
   - name: quarantine_trips
-    description: Trips rejected by validation, with the rejection reason, kept out of fct_trips.
+    description: Trips rejected by validation, with the rejection reason, kept out of fct_trips. Accumulates across monthly runs.
     columns:
       - name: rejection_reason
         description: "Validation rule that rejected the trip."
