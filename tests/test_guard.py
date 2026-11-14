@@ -6,6 +6,7 @@ import pytest
 import yaml
 from google.api_core.exceptions import BadRequest, Forbidden
 from google.cloud import bigquery
+from mistralai.client.utils import RetryConfig
 
 from chatbot import guard, llm
 from chatbot.guard import (
@@ -205,11 +206,13 @@ def test_headline_few_shot_uses_hourly_aggregate():
 class _FakeMistral:
     calls: list = []
     api_keys: list = []
+    retry_configs: list = []
     finish_reason = "stop"
     content = "select 1"
 
-    def __init__(self, api_key):
+    def __init__(self, api_key, retry_config=None):
         _FakeMistral.api_keys.append(api_key)
+        _FakeMistral.retry_configs.append(retry_config)
         self.chat = self
 
     def complete(self, **kwargs):
@@ -223,6 +226,7 @@ class _FakeMistral:
 def fake_mistral(monkeypatch):
     _FakeMistral.calls = []
     _FakeMistral.api_keys = []
+    _FakeMistral.retry_configs = []
     _FakeMistral.finish_reason = "stop"
     _FakeMistral.content = "select 1"
     monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
@@ -242,6 +246,21 @@ def test_complete_uses_default_model_and_system_prompt(fake_mistral):
     assert call["max_tokens"] == 4096
     assert call["temperature"] == 0
     assert fake_mistral.api_keys == ["test-key"]
+
+
+def test_complete_configures_retries(fake_mistral):
+    llm.complete("s", "u")
+    (config,) = fake_mistral.retry_configs
+    assert isinstance(config, RetryConfig)
+    assert config.strategy == "backoff"
+    assert config.retry_connection_errors is True
+
+
+@pytest.mark.parametrize("content", [None, "", []])
+def test_complete_raises_on_empty_content(fake_mistral, content):
+    fake_mistral.content = content
+    with pytest.raises(RuntimeError, match="model returned no text"):
+        llm.complete("s", "u")
 
 
 def test_complete_model_from_env_and_argument(fake_mistral, monkeypatch):
