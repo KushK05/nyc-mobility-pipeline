@@ -1,0 +1,16 @@
+# Mount the dbt project and the chatbot folder into every Airflow 3 service
+# that parses or runs DAG code.
+x-nyc-mobility-volumes: &nyc_mobility_volumes
+  volumes:
+    - ../dbt/nyc_mobility:/usr/local/airflow/include/dbt
+    - ../chatbot:/usr/local/airflow/include/chatbot
+
+services:
+  scheduler:
+    <<: *nyc_mobility_volumes
+  api-server:
+    <<: *nyc_mobility_volumes
+  triggerer:
+    <<: *nyc_mobility_volumes
+  dag-processor:
+    <<: *nyc_mobility_volumes
