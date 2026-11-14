@@ -1,0 +1,28 @@
+name: nyc_mobility
+version: "1.0.0"
+config-version: 2
+profile: nyc_mobility
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  run_month_start: "2024-01-01"
+  lookback_days: 3
+  weather_source: "python"
+
+models:
+  nyc_mobility:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+      +schema: marts

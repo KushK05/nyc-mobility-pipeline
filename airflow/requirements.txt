@@ -1,0 +1,11 @@
+# Python deps for the Astro Runtime image (Airflow itself comes from the base image).
+# Provider, dbt and BigQuery pins match what tests/test_dag.py was verified against
+# (Airflow 3.4.0, Python 3.12); the image runs Astro Runtime 3.3-12 (Airflow 3.3.2).
+# requests and pyarrow ship with the base image, so they get lower bounds only to
+# avoid fighting the image's own pins.
+apache-airflow-providers-http==6.4.0
+apache-airflow-providers-airbyte==6.2.0
+dbt-bigquery==1.12.3
+google-cloud-bigquery==3.47.0
+pyarrow>=14
+requests>=2.31

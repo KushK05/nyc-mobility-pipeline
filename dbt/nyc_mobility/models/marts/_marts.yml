@@ -1,0 +1,184 @@
+version: 2
+
+models:
+  - name: fct_trips
+    description: One row per valid taxi trip with hourly weather at pickup, partitioned by pickup_date.
+    columns:
+      - name: trip_id
+        description: "Surrogate key over vendor, pickup, dropoff, locations and fare."
+        tests:
+          - unique:
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
+          - not_null:
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
+      - name: vendor_id
+        description: "TLC vendor code."
+      - name: pickup_datetime
+        description: "Timestamp when the meter was engaged."
+      - name: dropoff_datetime
+        description: "Timestamp when the meter was disengaged."
+      - name: pickup_date
+        description: "Calendar date of the pickup (partition column)."
+      - name: pickup_hour
+        description: "Hour of day of the pickup, 0 to 23."
+      - name: pu_location_id
+        description: "Pickup taxi zone id, joins to dim_zone.location_id."
+        tests:
+          - relationships:
+              to: ref('dim_zone')
+              field: location_id
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
+      - name: do_location_id
+        description: "Dropoff taxi zone id, joins to dim_zone.location_id."
+        tests:
+          - relationships:
+              to: ref('dim_zone')
+              field: location_id
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
+      - name: passenger_count
+        description: "Number of passengers reported by the driver."
+      - name: trip_distance
+        description: "Trip distance in miles."
+      - name: trip_duration_min
+        description: "Trip duration in minutes."
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 360
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
+      - name: payment_type
+        description: "Payment type code (0 flex fare, 1 card, 2 cash, 3 no charge, 4 dispute, 5 unknown, 6 voided)."
+        tests:
+          - accepted_values:
+              values: [0, 1, 2, 3, 4, 5, 6]
+              quote: false
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
+      - name: fare_amount
+        description: "Metered time-and-distance fare in USD."
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              config:
+                where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
+      - name: tip_amount
+        description: "Tip in USD (card payments only)."
+      - name: tolls_amount
+        description: "Total tolls paid in USD."
+      - name: total_amount
+        description: "Total amount charged to the passenger in USD, excluding cash tips."
+      - name: congestion_surcharge
+        description: "Congestion surcharge in USD."
+      - name: airport_fee
+        description: "Airport pickup fee in USD."
+      - name: temperature_2m
+        description: "Air temperature at 2 m in Celsius during the pickup hour."
+      - name: rain
+        description: "Rainfall in mm during the pickup hour."
+      - name: snowfall
+        description: "Snowfall in cm during the pickup hour."
+      - name: wind_speed_10m
+        description: "Wind speed at 10 m during the pickup hour."
+      - name: is_rainy
+        description: "True when it rained during the pickup hour."
+      - name: source_month
+        description: "First day of the source file month the trip was loaded from."
+
+  - name: dim_zone
+    description: NYC taxi zones with borough and airport flag.
+    columns:
+      - name: location_id
+        description: "TLC taxi zone id."
+        tests:
+          - unique
+          - not_null
+      - name: borough
+        description: "Borough name."
+      - name: zone
+        description: "Zone name."
+      - name: service_zone
+        description: "TLC service zone."
+      - name: is_airport
+        description: "True for airport zones (name contains Airport, or ids 1, 132, 138)."
+
+  - name: dim_date
+    description: Calendar dimension for 2024 with weekend and US holiday flags.
+    columns:
+      - name: date_day
+        description: "Calendar date."
+        tests:
+          - unique
+          - not_null
+      - name: year
+        description: "Calendar year."
+      - name: month
+        description: "Calendar month number, 1 to 12."
+      - name: day_of_week
+        description: "Day of week, 1 = Sunday through 7 = Saturday."
+      - name: day_name
+        description: "Full weekday name."
+      - name: is_weekend
+        description: "True on Saturday and Sunday."
+      - name: is_holiday
+        description: "True on US federal holidays."
+      - name: holiday_name
+        description: "Holiday name, NULL on non-holidays."
+
+  - name: agg_hourly_zone_demand
+    description: Trips, fares and tips per pickup zone and hour, with weekend, holiday and rain flags.
+    columns:
+      - name: pickup_date
+        description: "Calendar date of the pickup (partition column)."
+      - name: pickup_hour
+        description: "Hour of day of the pickup, 0 to 23."
+      - name: pu_location_id
+        description: "Pickup taxi zone id."
+      - name: borough
+        description: "Borough of the pickup zone."
+      - name: zone
+        description: "Name of the pickup zone."
+      - name: trips
+        description: "Number of trips in the zone and hour."
+      - name: avg_fare
+        description: "Average metered fare in USD."
+      - name: avg_duration_min
+        description: "Average trip duration in minutes."
+      - name: avg_tip_pct
+        description: "Average tip as a percent of the fare."
+      - name: is_weekend
+        description: "True when pickup_date is a Saturday or Sunday."
+      - name: is_holiday
+        description: "True when pickup_date is a US federal holiday."
+      - name: is_rainy
+        description: "True when it rained during the pickup hour."
+
+  - name: agg_daily_weather_impact
+    description: Daily trip volume, duration, fare and revenue split by rain and pickup borough.
+    columns:
+      - name: pickup_date
+        description: "Calendar date of the pickup."
+      - name: is_rainy
+        description: "True when it rained during the pickup hour."
+      - name: trips
+        description: "Number of trips."
+      - name: avg_duration_min
+        description: "Average trip duration in minutes."
+      - name: avg_fare
+        description: "Average metered fare in USD."
+      - name: total_revenue
+        description: "Sum of total_amount in USD."
+      - name: borough
+        description: "Borough of the pickup zone."
+
+  - name: quarantine_trips
+    description: Trips rejected by validation, with the rejection reason, kept out of fct_trips. Accumulates across monthly runs.
+    columns:
+      - name: rejection_reason
+        description: "Validation rule that rejected the trip."
+      - name: run_month_start
+        description: "First day of the run month that produced this row."

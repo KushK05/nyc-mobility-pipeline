@@ -1,0 +1,85 @@
+version: 2
+
+models:
+  - name: stg_trips
+    description: Typed and renamed yellow taxi trips.
+    columns:
+      - name: vendor_id
+        description: "TLC vendor code (1 or 2 and others)."
+      - name: pickup_datetime
+        description: "Local pickup time."
+        tests:
+          - not_null
+      - name: dropoff_datetime
+        description: "Local dropoff time."
+      - name: passenger_count
+        description: "Passengers reported by the driver."
+      - name: trip_distance
+        description: "Trip distance in miles."
+      - name: ratecode_id
+        description: "Rate code in effect at end of trip."
+      - name: store_and_fwd_flag
+        description: "Whether the record was held in vehicle memory before sending (Y/N)."
+      - name: pu_location_id
+        description: "Pickup taxi zone LocationID."
+        tests:
+          - not_null
+      - name: do_location_id
+        description: "Dropoff taxi zone LocationID."
+      - name: payment_type
+        description: "Payment type code."
+      - name: fare_amount
+        description: "Metered time-and-distance fare."
+      - name: extra
+        description: "Extras and surcharges."
+      - name: mta_tax
+        description: "MTA tax."
+      - name: tip_amount
+        description: "Tip amount."
+      - name: tolls_amount
+        description: "Tolls paid."
+      - name: improvement_surcharge
+        description: "Improvement surcharge."
+      - name: total_amount
+        description: "Total charged to passenger, excluding cash tips."
+      - name: congestion_surcharge
+        description: "Congestion surcharge."
+      - name: airport_fee
+        description: "Airport fee."
+      - name: pickup_date
+        description: "Calendar date of pickup."
+      - name: pickup_hour
+        description: "Hour of pickup (0-23)."
+      - name: trip_duration_min
+        description: "Trip duration in minutes."
+      - name: source_month
+        description: "Month of the source TLC file."
+      - name: loaded_at
+        description: "Timestamp the row was loaded."
+
+  - name: stg_weather_hourly
+    description: Hourly weather with rain flag.
+    columns:
+      - name: observed_at
+        description: "Observation hour, local time."
+        tests:
+          - not_null
+          - unique
+      - name: observed_date
+        description: "Calendar date of observation."
+      - name: observed_hour
+        description: "Hour of observation (0-23)."
+      - name: temperature_2m
+        description: "Air temperature at 2 m."
+      - name: precipitation
+        description: "Total precipitation in the hour."
+      - name: rain
+        description: "Rain in the hour."
+      - name: snowfall
+        description: "Snowfall in the hour."
+      - name: wind_speed_10m
+        description: "Wind speed at 10 m."
+      - name: is_rainy
+        description: "True when rain is greater than 0.1."
+      - name: source_month
+        description: "Month of the source weather load."

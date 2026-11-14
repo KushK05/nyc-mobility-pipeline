@@ -1,0 +1,18 @@
+version: 2
+
+sources:
+  - name: raw_tlc
+    database: "{{ env_var('GCP_PROJECT_ID', 'local-parse') }}"
+    schema: raw_tlc
+    tables:
+      - name: yellow_trips
+        description: Raw TLC yellow taxi trips loaded by the Python ingest.
+
+  - name: raw_weather
+    database: "{{ env_var('GCP_PROJECT_ID', 'local-parse') }}"
+    schema: raw_weather
+    tables:
+      - name: weather_hourly
+        description: Hourly weather loaded by the Python ingest.
+      - name: open_meteo_archive
+        description: Airbyte Open-Meteo stream, one record per API call with arrays in `hourly`.

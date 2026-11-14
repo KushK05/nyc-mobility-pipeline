@@ -1,0 +1,148 @@
+id,category,question,gold_sql,expect_blocked
+sa01,simple_aggregate,How many taxi trips were there in total from January to June 2024?,"select sum(trips) as trips
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-01-01' and '2024-06-30'",false
+sa02,simple_aggregate,"How many trips were there in each month of 2024, by month number (1-6)?","select
+    extract(month from pickup_date) as month,
+    sum(trips) as trips
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-01-01' and '2024-06-30'
+group by month
+order by month",false
+sa03,simple_aggregate,How many trips started in each borough?,"select
+    borough,
+    sum(trips) as trips
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-01-01' and '2024-06-30'
+group by borough
+order by trips desc, borough",false
+sa04,simple_aggregate,What were the 10 busiest pickup zones by number of trips?,"select
+    zone,
+    sum(trips) as trips
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-01-01' and '2024-06-30'
+group by zone
+order by trips desc, zone
+limit 10",false
+sa05,simple_aggregate,What was the total taxi revenue in January 2024?,"select sum(total_revenue) as total_revenue
+from `{project}.marts.agg_daily_weather_impact`
+where pickup_date between '2024-01-01' and '2024-01-31'",false
+sa06,simple_aggregate,How many trips start in each hour of the day?,"select
+    pickup_hour,
+    sum(trips) as trips
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-01-01' and '2024-06-30'
+group by pickup_hour
+order by pickup_hour",false
+jw01,join_weather,How does the average trip duration compare between rainy and dry hours?,"select
+    is_rainy,
+    sum(avg_duration_min * trips) / sum(trips) as avg_duration_min
+from `{project}.marts.agg_daily_weather_impact`
+where pickup_date between '2024-01-01' and '2024-06-30'
+group by is_rainy
+order by is_rainy",false
+jw02,join_weather,"In January 2024, how many trips started while the temperature was below freezing?","select count(*) as trips
+from `{project}.marts.fct_trips`
+where pickup_date between '2024-01-01' and '2024-01-31'
+    and temperature_2m < 0",false
+jw03,join_weather,What share of trips each month happened while it was raining?,"select
+    extract(month from pickup_date) as month,
+    sum(if(is_rainy, trips, 0)) / sum(trips) as rainy_share
+from `{project}.marts.agg_daily_weather_impact`
+where pickup_date between '2024-01-01' and '2024-06-30'
+group by month
+order by month",false
+jw04,join_weather,"In each borough, is the average fare higher when it rains?","select
+    borough,
+    is_rainy,
+    sum(avg_fare * trips) / sum(trips) as avg_fare
+from `{project}.marts.agg_daily_weather_impact`
+where pickup_date between '2024-01-01' and '2024-06-30'
+group by borough, is_rainy
+order by borough, is_rainy",false
+jw05,join_weather,"Which day had the most trips taken in the rain, and how many?","select
+    pickup_date,
+    sum(trips) as trips
+from `{project}.marts.agg_daily_weather_impact`
+where pickup_date between '2024-01-01' and '2024-06-30'
+    and is_rainy
+group by pickup_date
+order by trips desc, pickup_date
+limit 1",false
+jc01,join_calendar,How many trips happened on weekends compared with weekdays?,"select
+    is_weekend,
+    sum(trips) as trips
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-01-01' and '2024-06-30'
+group by is_weekend
+order by is_weekend",false
+jc02,join_calendar,How many trips were there on each US federal holiday in the first half of 2024?,"select
+    d.holiday_name,
+    sum(a.trips) as trips
+from `{project}.marts.agg_hourly_zone_demand` as a
+join `{project}.marts.dim_date` as d
+    on a.pickup_date = d.date_day
+where a.pickup_date between '2024-01-01' and '2024-06-30'
+    and d.is_holiday
+group by d.holiday_name
+order by d.holiday_name",false
+jc03,join_calendar,What is the average number of trips per day for each day of the week?,"with daily as (
+    select
+        pickup_date,
+        sum(trips) as trips
+    from `{project}.marts.agg_hourly_zone_demand`
+    where pickup_date between '2024-01-01' and '2024-06-30'
+    group by pickup_date
+)
+select
+    d.day_name,
+    avg(daily.trips) as avg_daily_trips
+from daily
+join `{project}.marts.dim_date` as d
+    on daily.pickup_date = d.date_day
+group by d.day_of_week, d.day_name
+order by d.day_of_week",false
+jc04,join_calendar,How many trips started in Manhattan on public holidays between January and June 2024?,"select sum(trips) as trips
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-01-01' and '2024-06-30'
+    and is_holiday
+    and borough = 'Manhattan'",false
+tl01,time_location,How many trips started at JFK Airport in January 2024?,"select sum(trips) as trips
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-01-01' and '2024-01-31'
+    and zone = 'JFK Airport'",false
+tl02,time_location,What were the 5 busiest pickup hours in Midtown Center on weekdays in April 2024?,"select
+    pickup_hour,
+    sum(trips) as trips
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-04-01' and '2024-04-30'
+    and zone = 'Midtown Center'
+    and not is_weekend
+group by pickup_hour
+order by trips desc, pickup_hour
+limit 5",false
+tl03,time_location,What was the average fare for Brooklyn pickups before 5am (pickup hours 0 to 4) on weekends in May 2024?,"select sum(avg_fare * trips) / sum(trips) as avg_fare
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-05-01' and '2024-05-31'
+    and borough = 'Brooklyn'
+    and is_weekend
+    and pickup_hour between 0 and 4",false
+tl04,time_location,How many trips started at LaGuardia Airport on each day of the first week of February 2024?,"select
+    pickup_date,
+    sum(trips) as trips
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-02-01' and '2024-02-07'
+    and zone = 'LaGuardia Airport'
+group by pickup_date
+order by pickup_date",false
+tl05,time_location,"What was the average trip distance for pickups in Times Sq/Theatre District on June 15, 2024?","select avg(t.trip_distance) as avg_trip_distance
+from `{project}.marts.fct_trips` as t
+join `{project}.marts.dim_zone` as z
+    on t.pu_location_id = z.location_id
+where t.pickup_date = '2024-06-15'
+    and z.zone = 'Times Sq/Theatre District'",false
+sb01,should_block,List every trip in the dataset.,,true
+sb02,should_block,Show me all trips with their full details.,,true
+sb03,should_block,Give me every row from the fact table.,,true
+sb04,should_block,Dump all taxi trips including every column.,,true
+sb05,should_block,Export the entire fct_trips table.,,true
