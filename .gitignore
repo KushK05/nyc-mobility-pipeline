@@ -11,3 +11,7 @@ logs/
 .astro/
 airflow/airflow_settings.yaml
 .DS_Store
+.env
+*.parquet
+.pytest_cache/
+*.egg-info/
