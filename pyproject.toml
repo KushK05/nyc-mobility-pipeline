@@ -17,7 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-mock>=3.14", "responses>=0.25"]
 dbt = ["dbt-core>=1.8", "dbt-bigquery>=1.8"]
-chatbot = ["streamlit>=1.38", "anthropic>=2.8", "sqlglot>=25", "altair>=5"]
+chatbot = ["streamlit>=1.38", "mistralai>=3.0", "sqlglot>=25", "altair>=5"]
 airflow = [
     "apache-airflow>=3.0",
     "apache-airflow-providers-http>=5",

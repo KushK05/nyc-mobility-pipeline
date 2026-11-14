@@ -1,6 +1,6 @@
 """Run the text-to-SQL evaluation set against BigQuery and report execution accuracy.
 
-Usage: GCP_PROJECT_ID=... ANTHROPIC_API_KEY=... python eval/run_eval.py
+Usage: GCP_PROJECT_ID=... MISTRAL_API_KEY=... python eval/run_eval.py
 """
 
 import csv
