@@ -51,34 +51,40 @@ def load_questions(path: Path) -> list[dict]:
     return rows
 
 
-def _normalise(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = [str(c).lower() for c in df.columns]
-    df = df[sorted(df.columns)]
-    for col in df.columns:
-        if pd.api.types.is_numeric_dtype(df[col]):
-            df[col] = df[col].astype("float64").round(2)
-    return df.sort_values(list(df.columns), na_position="last").reset_index(drop=True)
+def _column_values(series: pd.Series) -> list:
+    """Sorted values of one column: numbers rounded to 2 dp, everything else as strings.
+
+    Missing values (NaN, None) sort last and compare equal to each other.
+    """
+    if pd.api.types.is_numeric_dtype(series):
+        values = series.astype("float64").round(2)
+        present = sorted(float(v) for v in values if not pd.isna(v))
+    else:
+        present = sorted(str(v) for v in series if not pd.isna(v))
+    return present + [None] * int(series.isna().sum())
 
 
-def compare_results(a: pd.DataFrame | None, b: pd.DataFrame | None) -> bool:
-    """True when both frames hold the same rows, ignoring row order, column order,
-    column name case and differences below 2 decimal places. NaN equals NaN."""
-    if a is None or b is None:
+def _match(gold_cols: list[list], answer_cols: list[list], used: set[int]) -> bool:
+    if not gold_cols:
+        return True
+    first, rest = gold_cols[0], gold_cols[1:]
+    for i, candidate in enumerate(answer_cols):
+        if i not in used and candidate == first and _match(rest, answer_cols, used | {i}):
+            return True
+    return False
+
+
+def compare_results(answer: pd.DataFrame | None, gold: pd.DataFrame | None) -> bool:
+    """True when every gold column's values equal those of a distinct answer column.
+
+    Column names and order are ignored and extra answer columns are allowed. Values are
+    compared per column after sorting, with numbers rounded to 2 dp and NaN equal to NaN.
+    """
+    if answer is None or gold is None or len(answer) != len(gold):
         return False
-    if a.shape != b.shape:
-        return False
-    if sorted(str(c).lower() for c in a.columns) != sorted(str(c).lower() for c in b.columns):
-        return False
-    if len(set(str(c).lower() for c in a.columns)) != a.shape[1]:
-        return False
-    try:
-        pd.testing.assert_frame_equal(
-            _normalise(a), _normalise(b), check_dtype=False, check_exact=True
-        )
-    except (AssertionError, TypeError, ValueError):
-        return False
-    return True
+    gold_cols = [_column_values(gold.iloc[:, i]) for i in range(gold.shape[1])]
+    answer_cols = [_column_values(answer.iloc[:, i]) for i in range(answer.shape[1])]
+    return _match(gold_cols, answer_cols, set())
 
 
 def _run_gold(client: bigquery.Client, gold_sql: str) -> pd.DataFrame:

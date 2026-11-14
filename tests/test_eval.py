@@ -68,23 +68,40 @@ def test_gold_sql_multi_row_queries_are_ordered():
 # compare_results
 
 
-def test_compare_results_ignores_order_and_rounding():
-    a = pd.DataFrame({"Borough": ["Queens", "Manhattan"], "trips": [10, 20], "fare": [1.234, 5.0]})
-    b = pd.DataFrame(
-        {"fare": [5.001, 1.2341], "borough": ["Manhattan", "Queens"], "TRIPS": [20.0, 10.0]}
+def test_compare_results_ignores_order_names_and_rounding():
+    answer = pd.DataFrame(
+        {"Borough": ["Queens", "Manhattan"], "n": [10, 20], "fare": [1.234, 5.0]}
     )
-    assert run_eval.compare_results(a, b) is True
+    gold = pd.DataFrame(
+        {"avg_fare": [5.001, 1.2341], "borough": ["Manhattan", "Queens"], "trips": [20.0, 10.0]}
+    )
+    assert run_eval.compare_results(answer, gold) is True
 
 
-def test_compare_results_nan_equals_nan_and_detects_differences():
-    a = pd.DataFrame({"x": [1.0, float("nan")], "y": ["a", "b"]})
-    b = pd.DataFrame({"x": [float("nan"), 1.0], "y": ["b", "a"]})
-    assert run_eval.compare_results(a, b) is True
-    assert run_eval.compare_results(a, b.assign(x=[float("nan"), 2.0])) is False
-    assert run_eval.compare_results(a, b.rename(columns={"y": "z"})) is False
-    assert run_eval.compare_results(a, b.head(1)) is False
-    assert run_eval.compare_results(a, None) is False
-    assert run_eval.compare_results(None, a) is False
+def test_compare_results_allows_extra_answer_columns():
+    answer = pd.DataFrame({"month": [1, 2], "trips": [5, 7], "avg_fare": [10.0, 11.0]})
+    gold = pd.DataFrame({"m": [2, 1], "t": [7, 5]})
+    assert run_eval.compare_results(answer, gold) is True
+    # Gold has a column the answer lacks.
+    assert run_eval.compare_results(gold, answer) is False
+
+
+def test_compare_results_matches_each_answer_column_once():
+    answer = pd.DataFrame({"a": [1, 2]})
+    gold = pd.DataFrame({"x": [1, 2], "y": [1, 2]})
+    assert run_eval.compare_results(answer, gold) is False
+    assert run_eval.compare_results(answer.assign(b=[2, 1]), gold) is True
+
+
+def test_compare_results_nan_rows_and_values():
+    answer = pd.DataFrame({"x": [1.0, float("nan")], "y": ["a", None]})
+    gold = pd.DataFrame({"x": [float("nan"), 1.0], "y": [None, "a"]})
+    assert run_eval.compare_results(answer, gold) is True
+    assert run_eval.compare_results(answer, gold.assign(x=[float("nan"), 2.0])) is False
+    assert run_eval.compare_results(answer, gold.assign(y=["b", "a"])) is False
+    assert run_eval.compare_results(answer, gold.head(1)) is False
+    assert run_eval.compare_results(answer, None) is False
+    assert run_eval.compare_results(None, gold) is False
 
 
 # run

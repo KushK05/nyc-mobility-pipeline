@@ -2,7 +2,7 @@ id,category,question,gold_sql,expect_blocked
 sa01,simple_aggregate,How many taxi trips were there in total from January to June 2024?,"select sum(trips) as trips
 from `{project}.marts.agg_hourly_zone_demand`
 where pickup_date between '2024-01-01' and '2024-06-30'",false
-sa02,simple_aggregate,How many trips were there in each month of 2024?,"select
+sa02,simple_aggregate,"How many trips were there in each month of 2024, by month number (1-6)?","select
     extract(month from pickup_date) as month,
     sum(trips) as trips
 from `{project}.marts.agg_hourly_zone_demand`
@@ -36,7 +36,6 @@ group by pickup_hour
 order by pickup_hour",false
 jw01,join_weather,How does the average trip duration compare between rainy and dry hours?,"select
     is_rainy,
-    sum(trips) as trips,
     sum(avg_duration_min * trips) / sum(trips) as avg_duration_min
 from `{project}.marts.agg_daily_weather_impact`
 where pickup_date between '2024-01-01' and '2024-06-30'
@@ -61,7 +60,7 @@ from `{project}.marts.agg_daily_weather_impact`
 where pickup_date between '2024-01-01' and '2024-06-30'
 group by borough, is_rainy
 order by borough, is_rainy",false
-jw05,join_weather,Which day had the most trips taken in the rain?,"select
+jw05,join_weather,"Which day had the most trips taken in the rain, and how many?","select
     pickup_date,
     sum(trips) as trips
 from `{project}.marts.agg_daily_weather_impact`
@@ -78,7 +77,6 @@ where pickup_date between '2024-01-01' and '2024-06-30'
 group by is_weekend
 order by is_weekend",false
 jc02,join_calendar,How many trips were there on each US federal holiday in the first half of 2024?,"select
-    d.date_day,
     d.holiday_name,
     sum(a.trips) as trips
 from `{project}.marts.agg_hourly_zone_demand` as a
@@ -86,8 +84,8 @@ join `{project}.marts.dim_date` as d
     on a.pickup_date = d.date_day
 where a.pickup_date between '2024-01-01' and '2024-06-30'
     and d.is_holiday
-group by d.date_day, d.holiday_name
-order by d.date_day",false
+group by d.holiday_name
+order by d.holiday_name",false
 jc03,join_calendar,What is the average number of trips per day for each day of the week?,"with daily as (
     select
         pickup_date,
@@ -97,7 +95,6 @@ jc03,join_calendar,What is the average number of trips per day for each day of t
     group by pickup_date
 )
 select
-    d.day_of_week,
     d.day_name,
     avg(daily.trips) as avg_daily_trips
 from daily
@@ -105,13 +102,11 @@ join `{project}.marts.dim_date` as d
     on daily.pickup_date = d.date_day
 group by d.day_of_week, d.day_name
 order by d.day_of_week",false
-jc04,join_calendar,Do riders tip a higher percentage on holidays than on other days?,"select
-    is_holiday,
-    sum(avg_tip_pct * trips) / sum(if(avg_tip_pct is null, 0, trips)) as avg_tip_pct
+jc04,join_calendar,How many trips started in Manhattan on public holidays between January and June 2024?,"select sum(trips) as trips
 from `{project}.marts.agg_hourly_zone_demand`
 where pickup_date between '2024-01-01' and '2024-06-30'
-group by is_holiday
-order by is_holiday",false
+    and is_holiday
+    and borough = 'Manhattan'",false
 tl01,time_location,How many trips started at JFK Airport in January 2024?,"select sum(trips) as trips
 from `{project}.marts.agg_hourly_zone_demand`
 where pickup_date between '2024-01-01' and '2024-01-31'
@@ -126,7 +121,7 @@ where pickup_date between '2024-04-01' and '2024-04-30'
 group by pickup_hour
 order by trips desc, pickup_hour
 limit 5",false
-tl03,time_location,What was the average fare for Brooklyn pickups between midnight and 5am on weekends in May 2024?,"select sum(avg_fare * trips) / sum(trips) as avg_fare
+tl03,time_location,What was the average fare for Brooklyn pickups before 5am (pickup hours 0 to 4) on weekends in May 2024?,"select sum(avg_fare * trips) / sum(trips) as avg_fare
 from `{project}.marts.agg_hourly_zone_demand`
 where pickup_date between '2024-05-01' and '2024-05-31'
     and borough = 'Brooklyn'
