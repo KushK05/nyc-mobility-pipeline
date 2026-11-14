@@ -60,7 +60,7 @@ This needs three sources joined together (trips + weather + calendar), answered 
 | Layer | Tool | Notes |
 |---|---|---|
 | Orchestration | Apache Airflow (via Astro CLI) | Runs locally in Docker |
-| Ingestion | Airbyte OSS (via `abctl`) | Airflow Python loaders (primary); Airbyte Connector Builder for weather (optional) |
+| Ingestion | Airflow Python loaders (Airbyte optional) | Airflow Python loaders (primary); Airbyte Connector Builder for weather (optional) |
 | Warehouse | Google BigQuery | Free-trial credits (see §5.1 about Sandbox limits) |
 | Transformation | dbt Core + `dbt-bigquery` | Plus `dbt_utils` package |
 | BI interface | Streamlit + LLM API | Streamlit + Claude API (anthropic SDK) |

@@ -4,6 +4,14 @@ Shows that re-running a later month picks up late rows for an earlier month with
 
 Prerequisite: `GCP_PROJECT_ID` is set, Jan and Feb 2024 have been loaded, and `astro dev start` is running.
 
+0. Record the baseline January counts and duplicates before injecting anything:
+
+   ```
+   python scripts/verify_idempotency.py --month 2024-01
+   ```
+
+   Keep this output (and a screenshot) to compare against step 3.
+
 1. Inject 500 late-arriving trips for January (copies of Jan 29-31 trips, shifted by 37 seconds, with a fresh `loaded_at`):
 
    ```
@@ -26,7 +34,7 @@ Prerequisite: `GCP_PROJECT_ID` is set, Jan and Feb 2024 have been loaded, and `a
    python scripts/verify_idempotency.py --month 2024-01
    ```
 
-   Jan 29-31 counts should rise by the injected rows, and duplicate trip_ids should be 0 (exit code 0).
+   Jan 29-31 counts should rise by up to 500 compared with the step 0 baseline (rows failing validation land in quarantine), and duplicate trip_ids should be 0 (exit code 0).
 
 4. Clear and re-run February again, then verify again:
 

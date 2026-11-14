@@ -38,7 +38,7 @@ Prerequisites: Python 3.12 and [uv](https://docs.astral.sh/uv/), Docker, the [As
 3. (GCP) `scripts/setup_gcp.sh` creates the `raw_tlc`, `raw_weather`, `staging`, `marts` and `quarantine` datasets and prints the service-account commands (`CREATE_SA=1` runs them).
 4. `make dbt-parse` checks that the dbt project parses (works offline).
 5. (GCP) `make dbt-build MONTH=2024-01-01` runs `dbt deps`, `dbt seed` and `dbt build` for one run month. The raw tables must already be loaded (step 6 does this).
-6. (GCP) Put the key at `airflow/include/gcp-key.json`, create `airflow/.env`, then `make airflow-start`. Add the connections `tlc_cloudfront` and `airbyte_default` and the Variable `use_airbyte_weather` as described in [airflow/README.md](airflow/README.md), unpause `nyc_mobility_pipeline` and let it backfill 2024-01 to 2024-06.
+6. (GCP) Put the key at `airflow/include/gcp-key.json`, create `airflow/.env`, then `make airflow-start`. Add the connection `tlc_cloudfront` and the Variable `use_airbyte_weather` as described in [airflow/README.md](airflow/README.md); the `airbyte_default` connection and the `airbyte_weather_connection_id` Variable are only needed when `use_airbyte_weather=true`. Then unpause `nyc_mobility_pipeline` and let it backfill 2024-01 to 2024-06.
 7. (GCP) `make chatbot` starts Streamlit (needs `ANTHROPIC_API_KEY`, `GCP_PROJECT_ID`, and `chatbot/metadata.json`, which the DAG writes in `refresh_chatbot_metadata`).
 8. (GCP) `make eval` runs the 25-question evaluation; `make cost-compare` dry-runs the partition-filter comparison.
 
