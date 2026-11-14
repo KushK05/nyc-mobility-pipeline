@@ -60,10 +60,10 @@ This needs three sources joined together (trips + weather + calendar), answered 
 | Layer | Tool | Notes |
 |---|---|---|
 | Orchestration | Apache Airflow (via Astro CLI) | Runs locally in Docker |
-| Ingestion | Airbyte OSS (via `abctl`) | File source for Parquet; Connector Builder for Open-Meteo |
+| Ingestion | Airbyte OSS (via `abctl`) | Airflow Python loaders (primary); Airbyte Connector Builder for weather (optional) |
 | Warehouse | Google BigQuery | Free-trial credits (see §5.1 about Sandbox limits) |
 | Transformation | dbt Core + `dbt-bigquery` | Plus `dbt_utils` package |
-| BI interface | Streamlit + LLM API | Gemini or Claude API for text-to-SQL |
+| BI interface | Streamlit + LLM API | Streamlit + Claude API (anthropic SDK) |
 | Language | Python 3.10+, SQL | |
 
 ---
@@ -132,6 +132,8 @@ pip install dbt-bigquery streamlit google-cloud-bigquery pandas
 - Parameters: `start_date`, `end_date` (incremental by date).
 - Destination: BigQuery → dataset `raw_weather`.
 - Note: the API returns arrays (`hourly.time[]`, `hourly.rain[]`…) that must be zipped into rows — either in the connector's record selector or in the dbt staging model with `UNNEST ... WITH OFFSET`.
+
+**Decision (implemented):** Airflow Python tasks download the monthly TLC Parquet and the Open-Meteo hourly JSON and load them into BigQuery directly (`raw_tlc.yellow_trips`, `raw_weather.weather_hourly`), each adding `source_month` and `loaded_at` and deleting the month's rows before appending, so re-runs are idempotent at the raw layer. Airbyte is kept as an optional path for weather only (Connector Builder manifest in `airbyte/`), toggled with the Airflow Variable `use_airbyte_weather=true` and dbt var `weather_source=airbyte`. This is the fallback sanctioned above, and §8 lists Airbyte URL switching as the first thing to cut.
 
 **Check:** Airbyte adds metadata columns (`_airbyte_raw_id`, `_airbyte_extracted_at`, …). Confirm the exact table and column names it creates before writing dbt sources.
 
@@ -331,28 +333,27 @@ Create `eval/questions.csv` with **~25 questions** and hand-verified gold SQL:
 ## 6. Repository Structure
 
 ```
-nyc-mobility-pipeline/
+NYC_DataP/
 ├── README.md
 ├── Plan.md
+├── Makefile
+├── pyproject.toml
+├── .env.example
 ├── airflow/                      # Astro project
 │   ├── dags/nyc_mobility_pipeline.py
-│   ├── include/
-│   │   ├── dbt/ → symlink or copy of dbt project
-│   │   └── gcp-key.json          # gitignored
-│   └── requirements.txt          # airbyte provider, dbt-bigquery
-├── dbt/nyc_mobility/             # see §5.3
-├── airbyte/
-│   └── connector_builder_open_meteo.yaml
-├── chatbot/
-│   ├── app.py
-│   ├── prompts.py
-│   └── guard.py
-├── scripts/
-│   └── inject_late_trips.py
-├── eval/
-│   ├── questions.csv
-│   └── run_eval.py
-├── docs/screenshots/             # for the report
+│   ├── include/nyc_mobility/     # Python loaders, alerts, config
+│   ├── Dockerfile, requirements.txt, packages.txt
+│   ├── docker-compose.override.yml
+│   └── README.md
+├── dbt/nyc_mobility/             # see §5.3 (models, seeds, macros, tests)
+├── airbyte/                      # optional weather path
+│   ├── connector_builder_open_meteo.yaml
+│   └── README.md
+├── chatbot/                      # app.py, guard.py, llm.py, prompts.py, pipeline.py, metadata.py, ...
+├── scripts/                      # setup_gcp.sh, inject_late_trips.py, verify_idempotency.py
+├── eval/                         # questions.csv, run_eval.py, partition_cost_comparison.py
+├── tests/                        # offline pytest suite
+├── docs/                         # runbook.md, late_data_demo.md, screenshots/
 └── .gitignore                    # keys, .venv, target/, logs/
 ```
 
