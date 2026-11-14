@@ -1,0 +1,93 @@
+# Airbyte Connector Builder manifest (declarative low-code) for the Open-Meteo
+# historical archive API. Mirrors airflow/include/nyc_mobility/ingest/weather.py:
+# same URL, coordinates, hourly variables and timezone.
+# Not validated locally; import it in the Connector Builder UI to test.
+version: "0.79.0"
+type: DeclarativeSource
+
+check:
+  type: CheckStream
+  stream_names:
+    - open_meteo_archive
+
+definitions:
+  requester:
+    type: HttpRequester
+    url_base: "https://archive-api.open-meteo.com/v1"
+    path: "/archive"
+    http_method: GET
+    request_parameters:
+      latitude: "40.71"
+      longitude: "-74.01"
+      hourly: "temperature_2m,precipitation,rain,snowfall,wind_speed_10m"
+      timezone: "America/New_York"
+
+streams:
+  - type: DeclarativeStream
+    name: open_meteo_archive
+    primary_key: []
+    retriever:
+      type: SimpleRetriever
+      requester:
+        $ref: "#/definitions/requester"
+      # The whole response is one record; the hourly arrays stay unflattened
+      # and dbt flattens them (weather_source: airbyte).
+      record_selector:
+        type: RecordSelector
+        extractor:
+          type: DpathExtractor
+          field_path: []
+      paginator:
+        type: NoPagination
+    # One request per calendar month; the cursor window supplies start/end dates.
+    incremental_sync:
+      type: DatetimeBasedCursor
+      cursor_field: start_date
+      datetime_format: "%Y-%m-%d"
+      cursor_datetime_formats:
+        - "%Y-%m-%d"
+      start_datetime:
+        type: MinMaxDatetime
+        datetime: "2024-01-01"
+        datetime_format: "%Y-%m-%d"
+      end_datetime:
+        type: MinMaxDatetime
+        datetime: "2024-06-30"
+        datetime_format: "%Y-%m-%d"
+      step: P1M
+      cursor_granularity: P1D
+      start_time_option:
+        type: RequestOption
+        inject_into: request_parameter
+        field_name: start_date
+      end_time_option:
+        type: RequestOption
+        inject_into: request_parameter
+        field_name: end_date
+    schema_loader:
+      type: InlineSchemaLoader
+      schema:
+        $schema: "http://json-schema.org/draft-07/schema#"
+        type: object
+        properties:
+          latitude:
+            type: number
+          longitude:
+            type: number
+          timezone:
+            type: string
+          hourly_units:
+            type: object
+          hourly:
+            type: object
+          start_date:
+            type: string
+
+spec:
+  type: Spec
+  connection_specification:
+    $schema: "http://json-schema.org/draft-07/schema#"
+    type: object
+    required: []
+    properties: {}
+    additionalProperties: true
