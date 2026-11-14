@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -201,66 +202,78 @@ def test_headline_few_shot_uses_hourly_aggregate():
         assert clause in text, clause
 
 
-class _Block:
-    def __init__(self, type_, text=""):
-        self.type = type_
-        self.text = text
+class _FakeMistral:
+    calls: list = []
+    api_keys: list = []
+    finish_reason = "stop"
+    content = "select 1"
 
+    def __init__(self, api_key):
+        _FakeMistral.api_keys.append(api_key)
+        self.chat = self
 
-class _FakeAnthropic:
-    calls = []
-    stop_reason = "end_turn"
-
-    def __init__(self, **kwargs):
-        assert kwargs == {}
-        self.beta = MagicMock()
-        self.beta.messages.create.side_effect = self._create
-
-    def _create(self, **kwargs):
-        _FakeAnthropic.calls.append(kwargs)
-        response = MagicMock()
-        response.stop_reason = _FakeAnthropic.stop_reason
-        response.content = [_Block("thinking"), _Block("text", "SELECT "), _Block("text", "1")]
-        return response
+    def complete(self, **kwargs):
+        _FakeMistral.calls.append(kwargs)
+        message = SimpleNamespace(content=_FakeMistral.content)
+        choice = SimpleNamespace(finish_reason=_FakeMistral.finish_reason, message=message)
+        return SimpleNamespace(choices=[choice])
 
 
 @pytest.fixture
-def fake_anthropic(monkeypatch):
-    _FakeAnthropic.calls = []
-    _FakeAnthropic.stop_reason = "end_turn"
-    monkeypatch.setattr(llm.anthropic, "Anthropic", _FakeAnthropic)
+def fake_mistral(monkeypatch):
+    _FakeMistral.calls = []
+    _FakeMistral.api_keys = []
+    _FakeMistral.finish_reason = "stop"
+    _FakeMistral.content = "select 1"
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
     monkeypatch.delenv("LLM_MODEL", raising=False)
-    return _FakeAnthropic
+    monkeypatch.setattr(llm, "Mistral", _FakeMistral)
+    return _FakeMistral
 
 
-def test_complete_uses_default_model_and_fallback_beta(fake_anthropic):
-    assert llm.complete("sys", "question") == "SELECT 1"
-    call = fake_anthropic.calls[0]
-    assert call["model"] == "claude-opus-5-5"
-    assert call["max_tokens"] == 16000
-    assert call["system"] == "sys"
-    assert call["messages"] == [{"role": "user", "content": "question"}]
-    assert call["betas"] == ["server-side-fallback-2026-07-01"]
-    assert call["fallbacks"] == "default"
+def test_complete_uses_default_model_and_system_prompt(fake_mistral):
+    assert llm.complete("sys", "question") == "select 1"
+    call = fake_mistral.calls[0]
+    assert call["model"] == "mistral-medium-latest"
+    assert call["messages"] == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "question"},
+    ]
+    assert call["max_tokens"] == 4096
+    assert call["temperature"] == 0
+    assert fake_mistral.api_keys == ["test-key"]
 
 
-def test_complete_model_from_env_and_argument(fake_anthropic, monkeypatch):
-    monkeypatch.setenv("LLM_MODEL", "claude-env-model")
+def test_complete_model_from_env_and_argument(fake_mistral, monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "env-model")
     llm.complete("s", "u")
-    llm.complete("s", "u", model="claude-arg-model")
-    assert [c["model"] for c in fake_anthropic.calls] == ["claude-env-model", "claude-arg-model"]
+    llm.complete("s", "u", model="arg-model")
+    assert [c["model"] for c in fake_mistral.calls] == ["env-model", "arg-model"]
 
 
-def test_complete_raises_on_truncation(fake_anthropic):
-    fake_anthropic.stop_reason = "max_tokens"
-    with pytest.raises(RuntimeError, match="model output truncated"):
+@pytest.mark.parametrize("reason", ["length", "model_length"])
+def test_complete_raises_on_truncation(fake_mistral, reason):
+    fake_mistral.finish_reason = reason
+    with pytest.raises(RuntimeError, match="truncated"):
         llm.complete("s", "u")
 
 
-def test_complete_raises_on_refusal(fake_anthropic):
-    fake_anthropic.stop_reason = "refusal"
-    with pytest.raises(RuntimeError, match="model refused"):
+def test_complete_raises_on_error_finish_reason(fake_mistral):
+    fake_mistral.finish_reason = "error"
+    with pytest.raises(RuntimeError, match="model error"):
         llm.complete("s", "u")
+
+
+def test_complete_joins_chunked_content(fake_mistral):
+    fake_mistral.content = [SimpleNamespace(text="sel"), SimpleNamespace(text="ect 1")]
+    assert llm.complete("s", "u") == "select 1"
+
+
+def test_complete_requires_api_key(fake_mistral, monkeypatch):
+    monkeypatch.delenv("MISTRAL_API_KEY")
+    with pytest.raises(RuntimeError, match="MISTRAL_API_KEY"):
+        llm.complete("s", "u")
+    assert fake_mistral.calls == []
 
 
 def test_project_pinning():

@@ -1,27 +1,33 @@
-"""Thin Anthropic client wrapper. The SDK reads ANTHROPIC_API_KEY from the environment."""
+"""Thin Mistral client wrapper. Reads MISTRAL_API_KEY from the environment."""
 
 import os
 
-import anthropic
+from mistralai.client import Mistral
 
-DEFAULT_MODEL = "claude-opus-5-5"
+DEFAULT_MODEL = "mistral-medium-latest"
 
 
 def complete(system: str, user: str, model: str | None = None) -> str:
-    """Send one user turn and return the concatenated text of the reply."""
-    client = anthropic.Anthropic()
-    response = client.beta.messages.create(
+    """Send one user turn and return the text of the reply."""
+    api_key = os.environ.get("MISTRAL_API_KEY")
+    if not api_key:
+        raise RuntimeError("MISTRAL_API_KEY is not set")
+    client = Mistral(api_key=api_key)
+    response = client.chat.complete(
         model=model or os.environ.get("LLM_MODEL", DEFAULT_MODEL),
-        max_tokens=16000,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        max_tokens=4096,
+        temperature=0,
     )
-    if response.stop_reason == "refusal":
-        raise RuntimeError("model refused")
-    if response.stop_reason == "max_tokens":
+    choice = response.choices[0]
+    if choice.finish_reason in ("length", "model_length"):
         raise RuntimeError("model output truncated")
-    return "".join(
-        block.text for block in response.content if getattr(block, "type", "") == "text"
-    )
+    if choice.finish_reason == "error":
+        raise RuntimeError("model error")
+    content = choice.message.content
+    if isinstance(content, str):
+        return content
+    return "".join(chunk.text for chunk in content or [] if hasattr(chunk, "text"))
