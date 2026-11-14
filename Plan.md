@@ -63,7 +63,7 @@ This needs three sources joined together (trips + weather + calendar), answered 
 | Ingestion | Airflow Python loaders (Airbyte optional) | Airflow Python loaders (primary); Airbyte Connector Builder for weather (optional) |
 | Warehouse | Google BigQuery | Free-trial credits (see §5.1 about Sandbox limits) |
 | Transformation | dbt Core + `dbt-bigquery` | Plus `dbt_utils` package |
-| BI interface | Streamlit + LLM API | Streamlit + Claude API (anthropic SDK) |
+| BI interface | Streamlit + LLM API | Streamlit + Mistral API (mistralai SDK) |
 | Language | Python 3.10+, SQL | |
 
 ---
