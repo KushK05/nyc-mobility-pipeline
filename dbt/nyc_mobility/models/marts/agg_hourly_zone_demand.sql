@@ -14,7 +14,8 @@ select
     avg(t.trip_duration_min) as avg_duration_min,
     avg(safe_divide(t.tip_amount, nullif(t.fare_amount, 0))) * 100 as avg_tip_pct,
     d.is_weekend,
-    d.is_holiday
+    d.is_holiday,
+    t.is_rainy
 from {{ ref('fct_trips') }} as t
 left join {{ ref('dim_zone') }} as z
     on t.pu_location_id = z.location_id
@@ -28,4 +29,5 @@ group by
     z.borough,
     z.zone,
     d.is_weekend,
-    d.is_holiday
+    d.is_holiday,
+    t.is_rainy

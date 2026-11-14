@@ -63,7 +63,7 @@ def test_marts_yml_has_required_tests():
     for col in ["pu_location_id", "do_location_id"]:
         rel = cfg(col, "relationships")
         assert rel["to"] == "ref('dim_zone')" and rel["field"] == "location_id"
-    assert cfg("payment_type", "accepted_values")["values"] == [1, 2, 3, 4, 5, 6]
+    assert cfg("payment_type", "accepted_values")["values"] == [0, 1, 2, 3, 4, 5, 6]
     assert cfg("fare_amount", "dbt_utils.accepted_range")["min_value"] == 0
     assert cfg("trip_duration_min", "dbt_utils.accepted_range")["max_value"] == 360
     for name in ["fct_trips", "agg_hourly_zone_demand", "agg_daily_weather_impact"]:
@@ -90,3 +90,17 @@ def test_quarantine_trips_is_incremental_insert_overwrite():
     text = (MARTS / "quarantine_trips.sql").read_text()
     assert "insert_overwrite" in text
     assert "require_partition_filter" not in text
+
+
+def test_qualify_is_preceded_by_where():
+    for path in [INTERMEDIATE / "int_trips_deduped.sql", MODELS / "staging" / "stg_weather_hourly.sql"]:
+        text = re.sub(r"\s+", " ", path.read_text().lower())
+        assert "qualify" in text, path
+        assert text.count(" qualify ") == text.count(" where true qualify "), path
+
+
+def test_hourly_agg_carries_is_rainy():
+    text = re.sub(r"\s+", " ", (MARTS / "agg_hourly_zone_demand.sql").read_text().lower())
+    select, group_by = text.split(" group by ")
+    assert "t.is_rainy" in select.split(" from ")[0]
+    assert "t.is_rainy" in group_by

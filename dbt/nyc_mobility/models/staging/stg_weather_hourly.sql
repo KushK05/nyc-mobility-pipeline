@@ -31,6 +31,7 @@ deduped as (
     -- Appended or overlapping syncs repeat hours; keep the latest extraction.
     select *
     from unnested
+    where true
     qualify row_number() over (partition by observed_at order by _airbyte_extracted_at desc) = 1
 
 )

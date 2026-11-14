@@ -16,7 +16,7 @@ MART_SCHEMA: dict[str, list[tuple[str, str, str]]] = {
         (
             "payment_type",
             "INT64",
-            "Payment type code (1 card, 2 cash, 3 no charge, 4 dispute, 5 unknown, 6 voided).",
+            "Payment type code (0 flex fare, 1 card, 2 cash, 3 no charge, 4 dispute, 5 unknown, 6 voided).",
         ),
         ("fare_amount", "FLOAT64", "Metered time-and-distance fare in USD."),
         ("tip_amount", "FLOAT64", "Tip in USD (card payments only)."),
@@ -64,6 +64,7 @@ MART_SCHEMA: dict[str, list[tuple[str, str, str]]] = {
         ("avg_tip_pct", "FLOAT64", "Average tip as a percent of the fare."),
         ("is_weekend", "BOOL", "True when pickup_date is a Saturday or Sunday."),
         ("is_holiday", "BOOL", "True when pickup_date is a US federal holiday."),
+        ("is_rainy", "BOOL", "True when it rained during the pickup hour."),
     ],
     "agg_daily_weather_impact": [
         ("pickup_date", "DATE", "Calendar date of the pickup."),
@@ -84,7 +85,7 @@ TABLE_DESCRIPTIONS: dict[str, str] = {
     "dim_zone": "NYC taxi zones with borough and airport flag.",
     "dim_date": "Calendar dimension for 2024 with weekend and US holiday flags.",
     "agg_hourly_zone_demand": (
-        "Trips, fares and tips per pickup zone and hour, with weekend and holiday flags."
+        "Trips, fares and tips per pickup zone and hour, with weekend, holiday and rain flags."
     ),
     "agg_daily_weather_impact": (
         "Daily trip volume, duration, fare and revenue split by rain and pickup borough."

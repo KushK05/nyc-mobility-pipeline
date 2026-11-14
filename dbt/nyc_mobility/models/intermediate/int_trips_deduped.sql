@@ -18,4 +18,5 @@ with trips as (
 
 select *
 from trips
+where true
 qualify row_number() over (partition by trip_id order by loaded_at desc) = 1

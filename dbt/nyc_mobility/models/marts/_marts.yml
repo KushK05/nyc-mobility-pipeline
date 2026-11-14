@@ -52,10 +52,10 @@ models:
               config:
                 where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
       - name: payment_type
-        description: "Payment type code (1 card, 2 cash, 3 no charge, 4 dispute, 5 unknown, 6 voided)."
+        description: "Payment type code (0 flex fare, 1 card, 2 cash, 3 no charge, 4 dispute, 5 unknown, 6 voided)."
         tests:
           - accepted_values:
-              values: [1, 2, 3, 4, 5, 6]
+              values: [0, 1, 2, 3, 4, 5, 6]
               quote: false
               config:
                 where: "pickup_date between date_sub(date('{{ var('run_month_start') }}'), interval {{ var('lookback_days', 3) }} day) and last_day(date('{{ var('run_month_start') }}'))"
@@ -130,7 +130,7 @@ models:
         description: "Holiday name, NULL on non-holidays."
 
   - name: agg_hourly_zone_demand
-    description: Trips, fares and tips per pickup zone and hour, with weekend and holiday flags.
+    description: Trips, fares and tips per pickup zone and hour, with weekend, holiday and rain flags.
     columns:
       - name: pickup_date
         description: "Calendar date of the pickup (partition column)."
@@ -154,6 +154,8 @@ models:
         description: "True when pickup_date is a Saturday or Sunday."
       - name: is_holiday
         description: "True when pickup_date is a US federal holiday."
+      - name: is_rainy
+        description: "True when it rained during the pickup hour."
 
   - name: agg_daily_weather_impact
     description: Daily trip volume, duration, fare and revenue split by rain and pickup borough.
