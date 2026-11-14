@@ -40,6 +40,7 @@ class EvalReport:
     blocked: int
     rerouted: int
     rows: list[dict]
+    errors: int = 0  # questions whose pipeline raised or whose gold query failed
 
 
 def load_questions(path: Path) -> list[dict]:
@@ -96,8 +97,26 @@ def run(
     questions: list[dict], client: bigquery.Client, project_id: str, complete: Complete
 ) -> EvalReport:
     rows: list[dict] = []
+    errors = 0
     for q in questions:
-        answer = answer_question(q["question"], client, project_id, complete=complete)
+        try:
+            answer = answer_question(q["question"], client, project_id, complete=complete)
+        except Exception as exc:  # noqa: BLE001 - one bad question must not stop the run
+            errors += 1
+            rows.append(
+                {
+                    "id": q["id"],
+                    "category": q["category"],
+                    "correct": False,
+                    "blocked": False,
+                    "rerouted": False,
+                    "bytes_scanned": 0,
+                    "cost_usd": 0.0,
+                    "sql": "",
+                    "error": str(exc),
+                }
+            )
+            continue
         error = answer.reason
         if q["expect_blocked"]:
             correct = answer.blocked
@@ -109,6 +128,7 @@ def run(
                 gold_df = _run_gold(client, gold_sql)
             except GoogleAPICallError as exc:
                 gold_df, error = None, f"gold query failed: {exc}"
+                errors += 1
             correct = compare_results(answer.data, gold_df)
         rows.append(
             {
@@ -124,13 +144,14 @@ def run(
             }
         )
 
-    answered = [r["bytes_scanned"] for r in rows if not r["blocked"]]
+    answered = [r["bytes_scanned"] for r in rows if not r["blocked"] and r["sql"]]
     return EvalReport(
         execution_accuracy=sum(r["correct"] for r in rows) / len(rows) if rows else 0.0,
         avg_bytes_scanned=sum(answered) / len(answered) if answered else 0.0,
         blocked=sum(r["blocked"] for r in rows),
         rerouted=sum(r["rerouted"] for r in rows),
         rows=rows,
+        errors=errors,
     )
 
 
@@ -157,11 +178,12 @@ def write_report(report: EvalReport, csv_path: Path, md_path: Path) -> None:
         f"| Avg bytes scanned (answered) | {report.avg_bytes_scanned / 1024**2:,.2f} MB |",
         f"| Blocked | {report.blocked} |",
         f"| Rerouted | {report.rerouted} |",
+        f"| Gold/runtime errors | {report.errors} |",
         "",
         "## Per question",
         "",
-        "| ID | Category | Correct | Blocked | Rerouted | Bytes scanned | Cost (USD) | SQL |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| ID | Category | Correct | Blocked | Rerouted | Bytes scanned | Cost (USD) | SQL | Error |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in report.rows:
         lines.append(
@@ -176,6 +198,7 @@ def write_report(report: EvalReport, csv_path: Path, md_path: Path) -> None:
                     f"{row['bytes_scanned']:,}",
                     f"{row['cost_usd']:.6f}",
                     f"`{_cell(row['sql'])}`" if row["sql"] else "",
+                    _cell(row.get("error")),
                 ]
             )
             + " |"
@@ -191,7 +214,7 @@ def main() -> None:
     write_report(report, EVAL_DIR / "results.csv", EVAL_DIR / "results.md")
     print(
         f"Execution accuracy {report.execution_accuracy:.1%} over {len(report.rows)} questions; "
-        f"blocked {report.blocked}, rerouted {report.rerouted}."
+        f"blocked {report.blocked}, rerouted {report.rerouted}, errors {report.errors}."
     )
 
 

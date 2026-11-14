@@ -11,13 +11,14 @@ Demo length is about 8-10 minutes. Everything below except the pytest suite need
 5. **BigQuery partition filter (1 min).** In the BigQuery console run this pair and compare "Bytes processed":
 
    ```sql
-   -- with partition filter
+   -- pruning filter: one partition
    SELECT COUNT(*) FROM `<project>.marts.fct_trips` WHERE pickup_date = '2024-03-15';
-   -- without (rejected if the table requires a partition filter; use the dry-run size)
-   SELECT COUNT(*) FROM `<project>.marts.fct_trips`;
+   -- full scan: fct_trips requires a partition filter, so a query with none is rejected;
+   -- this filter matches every partition, so it is accepted but prunes nothing
+   SELECT COUNT(*) FROM `<project>.marts.fct_trips` WHERE pickup_date >= DATE '2000-01-01';
    ```
 
-   Then run `make cost-compare` for the scripted dry-run comparison.
+   Then run `make cost-compare` for the scripted dry-run comparison (filtered vs full scan).
 6. **Late data (1 min).** Follow [late_data_demo.md](late_data_demo.md): inject late January trips, clear the 2024-02-01 DAG run, run `python scripts/verify_idempotency.py --month 2024-01`.
 7. **Chatbot (2-3 min).** `make chatbot`, then ask in order:
    1. How does rain affect average trip duration in Manhattan on weekday evenings?

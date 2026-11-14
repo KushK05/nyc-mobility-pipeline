@@ -204,6 +204,37 @@ def test_run_counts_blocked_as_correct_when_expected():
     assert (GOLD_GOOD.replace("{project}", "p"), False) in client.queries
 
 
+def test_run_records_pipeline_exceptions_and_continues():
+    questions = [
+        {"id": "q1", "category": "simple_aggregate", "question": "Q boom",
+         "gold_sql": GOLD_GOOD, "expect_blocked": False},
+        {"id": "q2", "category": "simple_aggregate", "question": "Q good",
+         "gold_sql": GOLD_GOOD, "expect_blocked": False},
+    ]
+
+    def complete(system, user):
+        if "Q boom" in user:
+            raise RuntimeError("model output truncated")
+        return SqlByQuestion({"Q good": GOOD})(system, user)
+
+    client = FakeClient(
+        bytes_by_sql={GOOD: 1000},
+        df_by_sql={
+            GOOD: pd.DataFrame({"trips": [5]}),
+            GOLD_GOOD.replace("{project}", "p"): pd.DataFrame({"trips": [5]}),
+        },
+    )
+    report = run_eval.run(questions, client, "p", complete)
+    first, second = report.rows
+    assert first["correct"] is False
+    assert first["error"] == "model output truncated"
+    assert first["blocked"] is False and first["bytes_scanned"] == 0 and first["sql"] == ""
+    assert second["correct"] is True and second["error"] is None
+    assert report.errors == 1
+    assert report.execution_accuracy == pytest.approx(0.5)
+    assert report.avg_bytes_scanned == pytest.approx(1000)
+
+
 def test_run_with_no_answers_has_zero_avg_bytes():
     report = run_eval.run([], FakeClient({}, {}), "p", SqlByQuestion({}))
     assert report.execution_accuracy == 0.0
@@ -217,12 +248,14 @@ def test_write_report_writes_csv_and_markdown(tmp_path):
         avg_bytes_scanned=2048.0,
         blocked=1,
         rerouted=0,
+        errors=1,
         rows=[
             {"id": "q1", "category": "simple_aggregate", "correct": True, "blocked": False,
              "rerouted": False, "bytes_scanned": 2048, "cost_usd": 0.0001,
-             "sql": "select 1\nfrom x | y"},
+             "sql": "select 1\nfrom x | y", "error": None},
             {"id": "q2", "category": "should_block", "correct": False, "blocked": True,
-             "rerouted": False, "bytes_scanned": 0, "cost_usd": 0.0, "sql": ""},
+             "rerouted": False, "bytes_scanned": 0, "cost_usd": 0.0, "sql": "",
+             "error": "gold query failed: 400 bad"},
         ],
     )
     csv_path, md_path = tmp_path / "results.csv", tmp_path / "results.md"
@@ -239,6 +272,9 @@ def test_write_report_writes_csv_and_markdown(tmp_path):
     assert "| q2 | should_block |" in md
     # Table cells stay on one line and escape pipes.
     assert "select 1 from x \\| y" in md
+    assert "| Gold/runtime errors | 1 |" in md
+    assert "| SQL | Error |" in md
+    assert md.splitlines()[-1].endswith("| gold query failed: 400 bad |")
     assert "\u2014" not in md
 
 
@@ -247,15 +283,18 @@ def test_write_report_writes_csv_and_markdown(tmp_path):
 
 def test_comparison_queries_shape():
     assert len(pcc.COMPARISON_QUERIES) == 5
-    for name, filtered, unfiltered in pcc.COMPARISON_QUERIES:
+    for name, filtered, full_scan in pcc.COMPARISON_QUERIES:
         assert name
         assert "{project}.marts.fct_trips" in filtered
-        assert "{project}.marts.fct_trips" in unfiltered
+        assert "{project}.marts.fct_trips" in full_scan
         assert "pickup_date" in filtered.split("where", 1)[1]
-        assert not re.search(r"\bpickup_date\b", unfiltered)
+        assert "pickup_date >= date '2000-01-01'" not in filtered
+        # The full-scan side satisfies require_partition_filter without pruning anything.
+        assert pcc.NON_PRUNING_FILTER == "pickup_date >= date '2000-01-01'"
+        assert pcc.NON_PRUNING_FILTER in full_scan
+        assert len(re.findall(r"\bpickup_date\b", full_scan)) == 1
         validate_select(filtered.replace("{project}", "dummy"), allowed_project="dummy")
-        with pytest.raises(GuardError, match="pickup_date"):
-            validate_select(unfiltered.replace("{project}", "dummy"), allowed_project="dummy")
+        validate_select(full_scan.replace("{project}", "dummy"), allowed_project="dummy")
 
 
 class FakeDryRunClient:
@@ -271,8 +310,8 @@ class FakeDryRunClient:
 
 
 def test_compare_dry_runs_and_records_errors():
-    _, _, first_unfiltered = pcc.COMPARISON_QUERIES[0]
-    fail_sql = first_unfiltered.replace("{project}", "p")
+    _, _, first_full_scan = pcc.COMPARISON_QUERIES[0]
+    fail_sql = first_full_scan.replace("{project}", "p")
     client = FakeDryRunClient(fail_sql)
 
     rows = pcc.compare(client, "p")
@@ -282,28 +321,30 @@ def test_compare_dry_runs_and_records_errors():
     assert len(client.configs) == 10
     first = rows[0]
     assert first["name"] == pcc.COMPARISON_QUERIES[0][0]
-    assert first["unfiltered_bytes"] is None
-    assert "without a filter" in first["unfiltered_error"]
+    assert first["full_scan_bytes"] is None
+    assert "without a filter" in first["full_scan_error"]
     assert first["filtered_bytes"] > 0 and first["filtered_error"] is None
     second = rows[1]
-    assert second["unfiltered_error"] is None
-    assert second["unfiltered_cost_usd"] == pytest.approx(
-        second["unfiltered_bytes"] / 1024**4 * 6.25
+    assert second["full_scan_error"] is None
+    assert second["full_scan_cost_usd"] == pytest.approx(
+        second["full_scan_bytes"] / 1024**4 * 6.25
     )
 
 
 def test_format_markdown_renders_bytes_cost_and_errors():
     rows = [
         {"name": "one day", "filtered_bytes": 1024**3, "filtered_cost_usd": 6.25 / 1024,
-         "filtered_error": None, "unfiltered_bytes": None, "unfiltered_cost_usd": None,
-         "unfiltered_error": "400 Cannot query | without filter"},
+         "filtered_error": None, "full_scan_bytes": None, "full_scan_cost_usd": None,
+         "full_scan_error": "400 Cannot query | without filter"},
         {"name": "month", "filtered_bytes": 2 * 1024**2, "filtered_cost_usd": 0.0,
-         "filtered_error": None, "unfiltered_bytes": 1024**4, "unfiltered_cost_usd": 6.25,
-         "unfiltered_error": None},
+         "filtered_error": None, "full_scan_bytes": 1024**4, "full_scan_cost_usd": 6.25,
+         "full_scan_error": None},
     ]
     md = pcc.format_markdown(rows)
     lines = md.strip().splitlines()
-    assert lines[0].startswith("| Query |")
+    assert lines[0] == (
+        "| Query | Filtered bytes | Filtered cost | Full scan bytes | Full scan cost |"
+    )
     assert len(lines) == 4
     assert "one day" in lines[2] and "1.00 GiB" in lines[2]
     assert "error: 400 Cannot query \\| without filter" in lines[2]
