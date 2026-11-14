@@ -12,7 +12,7 @@ def complete(system: str, user: str, model: str | None = None) -> str:
     client = anthropic.Anthropic()
     response = client.beta.messages.create(
         model=model or os.environ.get("LLM_MODEL", DEFAULT_MODEL),
-        max_tokens=2048,
+        max_tokens=16000,
         system=system,
         messages=[{"role": "user", "content": user}],
         betas=["server-side-fallback-2026-07-01"],
@@ -20,6 +20,8 @@ def complete(system: str, user: str, model: str | None = None) -> str:
     )
     if response.stop_reason == "refusal":
         raise RuntimeError("model refused")
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError("model output truncated")
     return "".join(
         block.text for block in response.content if getattr(block, "type", "") == "text"
     )

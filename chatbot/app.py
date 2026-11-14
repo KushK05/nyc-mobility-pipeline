@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from google.cloud import bigquery  # noqa: E402
 
-from chatbot.charts import choose_chart  # noqa: E402
+from chatbot.charts import choose_chart, date_column  # noqa: E402
 from chatbot.guard import LIMIT_BYTES  # noqa: E402
 from chatbot.metadata import format_bytes, load_metadata  # noqa: E402
 from chatbot.pipeline import ChatAnswer, answer_question  # noqa: E402
@@ -47,12 +47,10 @@ def render_chart(df: pd.DataFrame) -> None:
         label = next(c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c]))
         st.bar_chart(df.set_index(label))
     elif kind == "line":
-        date_col = next(
-            c
-            for c in df.columns
-            if pd.api.types.is_datetime64_any_dtype(df[c]) or "date" in str(c).lower()
-        )
-        st.line_chart(df.set_index(date_col).select_dtypes("number"))
+        date_col = date_column(df)
+        # BigQuery DATE columns arrive as dbdate/object; convert so the x axis is temporal.
+        series = df.assign(**{date_col: pd.to_datetime(df[date_col], errors="coerce")})
+        st.line_chart(series.set_index(date_col).select_dtypes("number"))
 
 
 def render_answer(a: ChatAnswer) -> None:

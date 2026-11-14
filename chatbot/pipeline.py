@@ -4,7 +4,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import pandas as pd
+import sqlglot
 from google.cloud import bigquery
+from sqlglot import exp
 
 from chatbot import llm
 from chatbot.guard import (
@@ -15,7 +17,12 @@ from chatbot.guard import (
     guarded_run,
     validate_select,
 )
-from chatbot.prompts import build_answer_prompt, build_rewrite_prompt, build_sql_prompt
+from chatbot.prompts import (
+    CANNOT_ANSWER_CHEAPLY,
+    build_answer_prompt,
+    build_rewrite_prompt,
+    build_sql_prompt,
+)
 
 Complete = Callable[[str, str], str]
 
@@ -44,6 +51,30 @@ def _rewrite(
 ) -> str:
     system, user = build_rewrite_prompt(question, sql, bytes_scanned, project_id)
     return clean_sql(complete(system, user + extra))
+
+
+def _is_fct_trips_row_dump(sql: str) -> bool:
+    """True when the root SELECT is `select *` (or `t.*`) straight from `fct_trips`."""
+    try:
+        root = sqlglot.parse_one(sql, read="bigquery")
+    except sqlglot.errors.ParseError:
+        return False
+    if isinstance(root, exp.With):
+        root = root.this
+    if not isinstance(root, exp.Select):
+        return False
+    star = any(
+        isinstance(e, exp.Star) or (isinstance(e, exp.Column) and isinstance(e.this, exp.Star))
+        for e in root.expressions
+    )
+    source = root.args.get("from_") or root.args.get("from")
+    table = source.this if source is not None else None
+    return star and isinstance(table, exp.Table) and table.name == "fct_trips"
+
+
+def _refuses_to_narrow(rewrite: str) -> bool:
+    """The rewrite gave up (sentinel) or would answer a whole-table request with a sample."""
+    return rewrite.upper() == CANNOT_ANSWER_CHEAPLY or _is_fct_trips_row_dump(rewrite)
 
 
 def _checked_run(
@@ -83,8 +114,11 @@ def answer_question(
         result = _checked_run(client, sql, project_id, limit_bytes)
     except GuardError as err:
         error = f"\n\nThe previous query was rejected: {err}"
-        sql = _rewrite(complete, question, sql, None, project_id, error)
-        attempts.append(sql)
+        rewritten = _rewrite(complete, question, sql, None, project_id, error)
+        attempts.append(rewritten)
+        if _refuses_to_narrow(rewritten):
+            return _blocked(question, sql, attempts, str(err))
+        sql = rewritten
         try:
             result = _checked_run(client, sql, project_id, limit_bytes)
         except GuardError as err2:
@@ -93,6 +127,9 @@ def answer_question(
     if result.blocked:
         rewritten = _rewrite(complete, question, sql, result.bytes_scanned, project_id)
         attempts.append(rewritten)
+        if _refuses_to_narrow(rewritten):
+            # Whole-table requests stay blocked rather than being answered with a sample.
+            return _blocked(question, sql, attempts, result.reason, result)
         try:
             retry = _checked_run(client, rewritten, project_id, limit_bytes)
         except GuardError as err:

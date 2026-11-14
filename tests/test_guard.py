@@ -184,6 +184,23 @@ def test_system_prompt_rules_and_few_shots_pass_the_guard():
     assert "{project}" not in system
 
 
+def test_headline_few_shot_uses_hourly_aggregate():
+    question, sql = FEW_SHOT_EXAMPLES[0]
+    assert "rain" in question.lower() and "manhattan" in question.lower()
+    text = " ".join(sql.lower().split())
+    assert "marts.agg_hourly_zone_demand" in text
+    assert "fct_trips" not in text
+    assert "sum(avg_duration_min * trips) / sum(trips)" in text
+    for clause in [
+        "borough = 'manhattan'",
+        "pickup_hour between 17 and 20",
+        "not is_weekend",
+        "pickup_date between '2024-01-01' and '2024-06-30'",
+        "group by is_rainy",
+    ]:
+        assert clause in text, clause
+
+
 class _Block:
     def __init__(self, type_, text=""):
         self.type = type_
@@ -220,7 +237,7 @@ def test_complete_uses_default_model_and_fallback_beta(fake_anthropic):
     assert llm.complete("sys", "question") == "SELECT 1"
     call = fake_anthropic.calls[0]
     assert call["model"] == "claude-opus-5-5"
-    assert call["max_tokens"] == 2048
+    assert call["max_tokens"] == 16000
     assert call["system"] == "sys"
     assert call["messages"] == [{"role": "user", "content": "question"}]
     assert call["betas"] == ["server-side-fallback-2026-07-01"]
@@ -232,6 +249,12 @@ def test_complete_model_from_env_and_argument(fake_anthropic, monkeypatch):
     llm.complete("s", "u")
     llm.complete("s", "u", model="claude-arg-model")
     assert [c["model"] for c in fake_anthropic.calls] == ["claude-env-model", "claude-arg-model"]
+
+
+def test_complete_raises_on_truncation(fake_anthropic):
+    fake_anthropic.stop_reason = "max_tokens"
+    with pytest.raises(RuntimeError, match="model output truncated"):
+        llm.complete("s", "u")
 
 
 def test_complete_raises_on_refusal(fake_anthropic):

@@ -157,3 +157,68 @@ def test_cost_rewrite_rejected_reports_original_query():
     assert answer.reason.startswith("Query would scan 1000 MB (limit 500 MB).")
     assert "outside the `marts` dataset" in answer.reason
     client.query.assert_called_once()
+
+
+STAR_SQL = (
+    "SELECT * FROM `p.marts.fct_trips` "
+    "WHERE pickup_date = '2024-01-01' LIMIT 100"
+)
+DUMP_SQL = "SELECT * FROM `p.marts.fct_trips` LIMIT 100"
+
+
+@pytest.mark.parametrize("reply", ["CANNOT_ANSWER_CHEAPLY", "```\ncannot_answer_cheaply;\n```"])
+def test_cost_rewrite_cannot_answer_is_blocked(reply):
+    complete = ScriptedComplete(BIG_SQL, reply)
+    client = _client(_job(LIMIT_BYTES * 2))
+    answer = answer_question("Show me every trip.", client, "p", complete=complete)
+    assert answer.blocked is True
+    assert answer.sql == BIG_SQL
+    assert answer.reason.startswith("Query would scan 1000 MB (limit 500 MB).")
+    assert answer.bytes_scanned == LIMIT_BYTES * 2
+    assert answer.data is None and answer.answer_text is None
+    assert len(complete.calls) == 2
+    client.query.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "rewrite", [STAR_SQL, STAR_SQL.replace("SELECT *", "SELECT t.*").replace("`p.marts.fct_trips`", "`p.marts.fct_trips` AS t")]
+)
+def test_cost_rewrite_to_select_star_on_fct_trips_is_blocked(rewrite):
+    complete = ScriptedComplete(BIG_SQL, rewrite)
+    client = _client(_job(LIMIT_BYTES * 2))
+    answer = answer_question("Show me every trip.", client, "p", complete=complete)
+    assert answer.blocked is True
+    assert answer.sql == BIG_SQL
+    assert answer.reason.startswith("Query would scan 1000 MB (limit 500 MB).")
+    assert answer.attempts == [BIG_SQL, rewrite]
+    assert len(complete.calls) == 2
+    client.query.assert_called_once()
+
+
+def test_guard_rewrite_cannot_answer_is_blocked_without_running():
+    complete = ScriptedComplete(DUMP_SQL, "CANNOT_ANSWER_CHEAPLY")
+    client = _client()
+    answer = answer_question("Show me every trip.", client, "p", complete=complete)
+    assert answer.blocked is True
+    assert answer.sql == DUMP_SQL
+    assert "must filter on `pickup_date`" in answer.reason
+    client.query.assert_not_called()
+
+
+def test_guard_rewrite_to_select_star_on_fct_trips_is_blocked():
+    complete = ScriptedComplete(DUMP_SQL, STAR_SQL)
+    client = _client()
+    answer = answer_question("Show me every trip.", client, "p", complete=complete)
+    assert answer.blocked is True
+    assert answer.sql == DUMP_SQL
+    client.query.assert_not_called()
+
+
+def test_rewrite_prompt_forbids_narrowing_full_table_requests():
+    from chatbot.prompts import build_rewrite_prompt
+
+    _, user = build_rewrite_prompt("Show me every trip.", BIG_SQL, LIMIT_BYTES * 2, "p")
+    assert (
+        "If the question requires every row or the whole table, do not narrow it; "
+        "reply with exactly CANNOT_ANSWER_CHEAPLY."
+    ) in user

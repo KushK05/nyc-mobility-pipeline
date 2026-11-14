@@ -3,6 +3,9 @@
 from chatbot.guard import LIMIT_BYTES
 from chatbot.schema_catalog import render_schema
 
+# Sentinel the rewrite step returns when a question needs every row of a table.
+CANNOT_ANSWER_CHEAPLY = "CANNOT_ANSWER_CHEAPLY"
+
 SYSTEM_PROMPT_TEMPLATE = """You translate questions about NYC yellow taxi trips and weather into one BigQuery SQL query.
 
 Rules:
@@ -25,17 +28,16 @@ FEW_SHOT_EXAMPLES: list[tuple[str, str]] = [
     (
         "Does rain make trips longer in Manhattan on weekday evenings?",
         """select
-    t.is_rainy,
-    count(*) as trips,
-    avg(t.trip_duration_min) as avg_duration_min
-from `{project}.marts.fct_trips` as t
-join `{project}.marts.dim_zone` as z
-    on t.pu_location_id = z.location_id
-where t.pickup_date between '2024-01-01' and '2024-06-30'
-    and z.borough = 'Manhattan'
-    and t.pickup_hour between 17 and 20
-    and extract(dayofweek from t.pickup_date) between 2 and 6
-group by t.is_rainy""",
+    is_rainy,
+    sum(trips) as trips,
+    sum(avg_duration_min * trips) / sum(trips) as avg_duration_min
+from `{project}.marts.agg_hourly_zone_demand`
+where pickup_date between '2024-01-01' and '2024-06-30'
+    and borough = 'Manhattan'
+    and pickup_hour between 17 and 20
+    and not is_weekend
+group by is_rainy
+order by is_rainy""",
     ),
     (
         "How many trips were there in March 2024?",
@@ -108,7 +110,9 @@ def build_rewrite_prompt(
         f"Rewrite it to answer the same question while scanning under {limit_mb:.0f} MB: "
         "use the `agg_hourly_zone_demand` or `agg_daily_weather_impact` tables, "
         "or a narrower `pickup_date` range. Use only tables in the `marts` dataset. "
-        "Return only SQL."
+        "If the question requires every row or the whole table, do not narrow it; "
+        f"reply with exactly {CANNOT_ANSWER_CHEAPLY}. "
+        "Otherwise return only SQL."
     )
     return build_system_prompt(project_id), user
 

@@ -2,7 +2,7 @@ import json
 
 import pandas as pd
 
-from chatbot.charts import choose_chart
+from chatbot.charts import choose_chart, date_column
 from chatbot.metadata import format_bytes, load_metadata
 
 DEFAULTS = {"months_loaded": [], "last_run_at": None, "quarantine_pct": None}
@@ -42,6 +42,15 @@ def test_choose_chart_bar():
 def test_choose_chart_line():
     df = pd.DataFrame({"pickup_date": pd.to_datetime(["2024-01-01", "2024-01-02"]), "a": [1, 2], "b": ["x", "y"]})
     assert choose_chart(df) == "line"
+
+
+def test_choose_chart_line_for_single_date_column():
+    dt = pd.DataFrame({"day": pd.to_datetime(["2024-01-01", "2024-01-02"]), "trips": [1, 2]})
+    assert choose_chart(dt) == "line"
+    named = pd.DataFrame({"pickup_date": ["2024-01-01", "2024-01-02"], "trips": [1, 2]})
+    assert choose_chart(named) == "line"
+    assert date_column(named) == "pickup_date"
+    assert date_column(pd.DataFrame({"borough": ["a"], "trips": [1]})) is None
 
 
 def test_choose_chart_none():
