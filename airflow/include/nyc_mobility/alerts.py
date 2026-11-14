@@ -26,6 +26,8 @@ def on_failure_callback(context: dict) -> None:
     """
     dag_id, task_id, run_id, log_url = _describe(context)
     message = f"PIPELINE FAILURE dag={dag_id} task={task_id} run={run_id} url={log_url}"
+    if context.get("reason"):
+        message += f" reason={context['reason']}"
     log.error(message)
 
     webhook = os.environ.get("SLACK_WEBHOOK_URL")

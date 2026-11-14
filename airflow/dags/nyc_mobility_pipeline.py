@@ -118,14 +118,23 @@ def choose_weather_path(**context) -> str:
 
 
 def _dbt_test_state(context) -> str | None:
-    dag_run = context["dag_run"]
-    ti = context["ti"]
-    if hasattr(ti, "get_task_states"):  # Airflow 3 Task SDK
+    """Read the dbt_test state across Airflow versions; None when it cannot be read."""
+    dag_run = context.get("dag_run")
+    ti = context.get("ti")
+    if ti is not None and dag_run is not None and hasattr(ti, "get_task_states"):
+        # Airflow 3 Task SDK
         states = ti.get_task_states(
             dag_id=dag_run.dag_id, task_ids=["dbt_test"], run_ids=[dag_run.run_id]
         )
         return states.get(dag_run.run_id, {}).get("dbt_test")
-    return dag_run.get_task_instance("dbt_test").state  # pragma: no cover - Airflow 2
+    if dag_run is not None and hasattr(dag_run, "get_task_instance"):
+        # Older runtimes expose the DagRun model directly.
+        return getattr(dag_run.get_task_instance("dbt_test"), "state", None)
+    log.warning(
+        "Cannot read dbt_test state: neither ti.get_task_states nor "
+        "dag_run.get_task_instance is available"
+    )
+    return None
 
 
 def route_on_tests(**context) -> str:
@@ -137,10 +146,11 @@ def route_on_tests(**context) -> str:
 
 
 def alert_and_stop(**context) -> None:
-    alerts.on_failure_callback(context)
-    raise AirflowFailException(
-        f"dbt tests failed for month {month_start(context['ds'])}; stopping the run"
-    )
+    state = _dbt_test_state(context)
+    state = getattr(state, "value", state)
+    reason = f"pipeline stopped for month {month_start(context['ds'])}: dbt_test state={state}"
+    alerts.on_failure_callback({**context, "reason": reason})
+    raise AirflowFailException(reason)
 
 
 def refresh_chatbot_metadata(**context) -> dict:
@@ -258,8 +268,12 @@ with DAG(
     dbt_seed = BashOperator(task_id="dbt_seed", bash_command=_dbt_command("seed"))
     dbt_run = BashOperator(task_id="dbt_run", bash_command=_dbt_command("run"))
     # `dbt test` exits non-zero on any failing test, which fails this task.
+    # Test failures are deterministic, so retrying only delays the alert.
     dbt_test = BashOperator(
-        task_id="dbt_test", bash_command=_dbt_command("test"), do_xcom_push=True
+        task_id="dbt_test",
+        bash_command=_dbt_command("test"),
+        do_xcom_push=True,
+        retries=0,
     )
 
     route = BranchPythonOperator(

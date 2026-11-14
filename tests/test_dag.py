@@ -103,6 +103,8 @@ def test_task_settings(dag):
         assert "cd $DBT_PROJECT_DIR" in command
         assert """--vars '{"run_month_start": "{{ ds }}"}'""" in command
     assert dag.get_task("dbt_test").do_xcom_push is True
+    # A failing dbt test is deterministic: do not retry it.
+    assert dag.get_task("dbt_test").retries == 0
 
 
 def test_choose_weather_path_reads_variable(dag, monkeypatch):
@@ -129,6 +131,32 @@ def test_route_on_tests_branches_on_dbt_test_state(dag):
     assert callable_(**context("upstream_failed")) == "alert_and_stop"
 
 
+def test_route_on_tests_falls_back_to_dag_run_task_instance(dag):
+    callable_ = dag.get_task("route_on_tests").python_callable
+
+    def context(state):
+        ti = MagicMock(spec=["task_id"])  # no get_task_states
+        dag_run = MagicMock(spec=["run_id", "dag_id", "get_task_instance"], run_id="r", dag_id=DAG_ID)
+        dag_run.get_task_instance.return_value = MagicMock(state=state)
+        return {"ti": ti, "dag_run": dag_run}
+
+    ctx = context("success")
+    assert callable_(**ctx) == "refresh_chatbot_metadata"
+    ctx["dag_run"].get_task_instance.assert_called_once_with("dbt_test")
+    assert callable_(**context("failed")) == "alert_and_stop"
+
+
+def test_route_on_tests_stops_when_state_is_unreadable(dag, caplog):
+    callable_ = dag.get_task("route_on_tests").python_callable
+    ctx = {
+        "ti": MagicMock(spec=["task_id"]),
+        "dag_run": MagicMock(spec=["run_id", "dag_id"], run_id="r", dag_id=DAG_ID),
+    }
+    with caplog.at_level("WARNING"):
+        assert callable_(**ctx) == "alert_and_stop"
+    assert "dbt_test state" in caplog.text
+
+
 def test_alert_and_stop_raises_fail_exception(dag, monkeypatch):
     from airflow.sdk.exceptions import AirflowFailException
 
@@ -136,9 +164,23 @@ def test_alert_and_stop_raises_fail_exception(dag, monkeypatch):
 
     calls = []
     monkeypatch.setattr(alerts, "on_failure_callback", lambda ctx: calls.append(ctx))
-    with pytest.raises(AirflowFailException):
-        dag.get_task("alert_and_stop").python_callable(ds="2024-01-01")
+    ti = MagicMock()
+    ti.get_task_states.return_value = {"run_1": {"dbt_test": "upstream_failed"}}
+    dag_run = MagicMock(run_id="run_1", dag_id=DAG_ID)
+    with pytest.raises(AirflowFailException, match="dbt_test state=upstream_failed"):
+        dag.get_task("alert_and_stop").python_callable(ds="2024-01-01", ti=ti, dag_run=dag_run)
     assert calls
+    assert "dbt_test state=upstream_failed" in calls[0]["reason"]
+    assert "dbt tests failed" not in calls[0]["reason"]
+
+
+def test_on_failure_callback_includes_reason(monkeypatch, caplog):
+    from nyc_mobility import alerts
+
+    monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
+    with caplog.at_level("ERROR"):
+        alerts.on_failure_callback(_context(reason="pipeline stopped: dbt_test state=failed"))
+    assert "reason=pipeline stopped: dbt_test state=failed" in caplog.text
 
 
 def _context(**extra):
