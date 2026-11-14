@@ -32,3 +32,39 @@ def test_deduped_uses_surrogate_key():
 
 def test_with_weather_joins_on_hour():
     assert "datetime_trunc(pickup_datetime, hour)" in _text("int_trips_with_weather.sql")
+
+
+MARTS = MODELS / "marts"
+
+
+def test_fct_trips_config_is_partitioned_and_filtered():
+    text = re.sub(r"\s+", " ", (MARTS / "fct_trips.sql").read_text().lower())
+    assert "insert_overwrite" in text
+    assert "require_partition_filter=true" in text.replace(" ", "")
+    assert "cluster_by=['pu_location_id','do_location_id']" in text.replace(" ", "")
+    assert "lookback_days" in text
+    assert "rejection_reason" not in text
+
+
+def test_marts_yml_has_required_tests():
+    import yaml
+
+    doc = yaml.safe_load((MARTS / "_marts.yml").read_text())
+    models = {m["name"]: m for m in doc["models"]}
+    cols = {c["name"]: c for c in models["fct_trips"]["columns"]}
+
+    def kinds(col):
+        return [t if isinstance(t, str) else next(iter(t)) for t in cols[col].get("tests", [])]
+
+    def cfg(col, kind):
+        return next(t[kind] for t in cols[col]["tests"] if isinstance(t, dict) and kind in t)
+
+    assert {"unique", "not_null"} <= set(kinds("trip_id"))
+    for col in ["pu_location_id", "do_location_id"]:
+        rel = cfg(col, "relationships")
+        assert rel["to"] == "ref('dim_zone')" and rel["field"] == "location_id"
+    assert cfg("payment_type", "accepted_values")["values"] == [1, 2, 3, 4, 5, 6]
+    assert cfg("fare_amount", "dbt_utils.accepted_range")["min_value"] == 0
+    assert cfg("trip_duration_min", "dbt_utils.accepted_range")["max_value"] == 360
+    for name in ["fct_trips", "agg_hourly_zone_demand", "agg_daily_weather_impact"]:
+        assert all(c.get("description") for c in models[name]["columns"]), name
