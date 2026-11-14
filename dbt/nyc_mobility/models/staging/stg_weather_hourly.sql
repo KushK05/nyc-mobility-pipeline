@@ -15,6 +15,7 @@ unnested as (
 
     select
         parse_datetime('%Y-%m-%dT%H:%M', t) as observed_at,
+        _airbyte_extracted_at,
         safe_cast(json_value_array(hourly, '$.temperature_2m')[safe_offset(i)] as float64) as temperature_2m,
         safe_cast(json_value_array(hourly, '$.precipitation')[safe_offset(i)] as float64) as precipitation,
         safe_cast(json_value_array(hourly, '$.rain')[safe_offset(i)] as float64) as rain,
@@ -22,6 +23,15 @@ unnested as (
         safe_cast(json_value_array(hourly, '$.wind_speed_10m')[safe_offset(i)] as float64) as wind_speed_10m
     from src,
         unnest(json_value_array(hourly, '$.time')) as t with offset as i
+
+),
+
+deduped as (
+
+    -- Appended or overlapping syncs repeat hours; keep the latest extraction.
+    select *
+    from unnested
+    qualify row_number() over (partition by observed_at order by _airbyte_extracted_at desc) = 1
 
 )
 
@@ -36,7 +46,7 @@ select
     wind_speed_10m,
     rain > 0.1 as is_rainy,
     date_trunc(date(observed_at), month) as source_month
-from unnested
+from deduped
 
 {% else %}
 

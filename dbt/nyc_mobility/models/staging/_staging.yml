@@ -64,6 +64,7 @@ models:
         description: "Observation hour, local time."
         tests:
           - not_null
+          - unique
       - name: observed_date
         description: "Calendar date of observation."
       - name: observed_hour
