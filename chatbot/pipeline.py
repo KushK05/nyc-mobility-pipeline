@@ -46,19 +46,12 @@ def _rewrite(
     return clean_sql(complete(system, user + extra))
 
 
-def _validated_sql(
-    question: str, sql: str, project_id: str, complete: Complete, attempts: list[str]
-) -> str:
-    """Validate `sql`; on a GuardError try one rewrite. Raises GuardError if that fails too."""
-    try:
-        validate_select(sql)
-        return sql
-    except GuardError as err:
-        error = f"\n\nThe previous query was rejected: {err}"
-        rewritten = _rewrite(complete, question, sql, None, project_id, error)
-        attempts.append(rewritten)
-        validate_select(rewritten)
-        return rewritten
+def _checked_run(
+    client: bigquery.Client, sql: str, project_id: str, limit_bytes: int
+) -> GuardResult:
+    """Validate then dry-run/execute `sql`. Raises GuardError on any rejection."""
+    validate_select(sql, allowed_project=project_id)
+    return guarded_run(client, sql, limit_bytes)
 
 
 def _blocked(question, sql, attempts, reason, result: GuardResult | None = None) -> ChatAnswer:
@@ -87,21 +80,26 @@ def answer_question(
     sql = clean_sql(complete(*build_sql_prompt(question, project_id)))
     attempts.append(sql)
     try:
-        sql = _validated_sql(question, sql, project_id, complete, attempts)
+        result = _checked_run(client, sql, project_id, limit_bytes)
     except GuardError as err:
-        return _blocked(question, attempts[-1], attempts, str(err))
+        error = f"\n\nThe previous query was rejected: {err}"
+        sql = _rewrite(complete, question, sql, None, project_id, error)
+        attempts.append(sql)
+        try:
+            result = _checked_run(client, sql, project_id, limit_bytes)
+        except GuardError as err2:
+            return _blocked(question, sql, attempts, str(err2))
 
-    result = guarded_run(client, sql, limit_bytes)
     if result.blocked:
         rewritten = _rewrite(complete, question, sql, result.bytes_scanned, project_id)
         attempts.append(rewritten)
         try:
-            validate_select(rewritten)
-        except GuardError:
-            # The rewrite is unusable; report the original over-limit reason.
-            return _blocked(question, rewritten, attempts, result.reason, result)
-        sql = rewritten
-        result = guarded_run(client, sql, limit_bytes)
+            retry = _checked_run(client, rewritten, project_id, limit_bytes)
+        except GuardError as err:
+            # The rewrite is unusable; report the original query and its scan size.
+            reason = f"{result.reason} The cheaper rewrite was rejected: {err}"
+            return _blocked(question, sql, attempts, reason, result)
+        sql, result = rewritten, retry
         if result.blocked:
             return _blocked(question, sql, attempts, result.reason, result)
 

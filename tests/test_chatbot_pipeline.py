@@ -2,6 +2,7 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
+from google.api_core.exceptions import BadRequest
 from google.cloud import bigquery
 
 from chatbot.guard import LIMIT_BYTES
@@ -111,3 +112,48 @@ def test_blocked_twice_gives_blocked_answer():
     assert answer.reason.startswith("Query would scan 1000 MB")
     assert answer.data is None and answer.answer_text is None
     assert len(complete.calls) == 2
+
+
+def test_other_project_table_triggers_rewrite():
+    other = "SELECT sum(trips) AS trips FROM `bigquery-public-data.marts.agg_hourly_zone_demand`"
+    complete = ScriptedComplete(other, AGG_SQL, "42 trips.")
+    client = _client(_job(1024**2), _job(df=DF))
+    answer = answer_question("How many trips?", client, "p", complete=complete)
+    assert answer.attempts == [other, AGG_SQL]
+    assert answer.blocked is False
+    assert "outside the `p` project" in complete.calls[1][1]
+
+
+def test_bigquery_error_triggers_one_rewrite():
+    complete = ScriptedComplete(AGG_SQL, AGG_SQL.replace("trips)", "trips) AS t, 1"), "42 trips.")
+    client = _client(BadRequest("Unrecognized name: foo"), _job(1024**2), _job(df=DF))
+    answer = answer_question("How many trips?", client, "p", complete=complete)
+    assert answer.blocked is False
+    assert answer.rerouted is True
+    assert len(answer.attempts) == 2
+    assert answer.answer_text == "42 trips."
+    assert "BigQuery rejected the query: Unrecognized name: foo" in complete.calls[1][1]
+
+
+def test_bigquery_error_twice_gives_blocked_answer():
+    complete = ScriptedComplete(AGG_SQL, AGG_SQL)
+    client = _client(BadRequest("Unrecognized name: foo"), BadRequest("Unrecognized name: bar"))
+    answer = answer_question("How many trips?", client, "p", complete=complete)
+    assert answer.blocked is True
+    assert "BigQuery rejected" in answer.reason
+    assert "bar" in answer.reason
+    assert answer.attempts == [AGG_SQL, AGG_SQL]
+    assert answer.data is None and answer.answer_text is None
+
+
+def test_cost_rewrite_rejected_reports_original_query():
+    complete = ScriptedComplete(BIG_SQL, BAD_SQL)
+    client = _client(_job(LIMIT_BYTES * 2))
+    answer = answer_question("How many trips?", client, "p", complete=complete)
+    assert answer.blocked is True
+    assert answer.sql == BIG_SQL
+    assert answer.bytes_scanned == LIMIT_BYTES * 2
+    assert answer.attempts == [BIG_SQL, BAD_SQL]
+    assert answer.reason.startswith("Query would scan 1000 MB (limit 500 MB).")
+    assert "outside the `marts` dataset" in answer.reason
+    client.query.assert_called_once()

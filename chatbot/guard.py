@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 import sqlglot
+from google.api_core.exceptions import GoogleAPICallError
 from google.cloud import bigquery
 from sqlglot import exp
 
@@ -55,8 +56,13 @@ def _is_select_root(expression: exp.Expression) -> bool:
     return isinstance(expression, exp.With) and isinstance(expression.this, exp.Select)
 
 
-def validate_select(sql: str, allowed_dataset: str = "marts") -> None:
-    """Raise GuardError unless `sql` is one read-only SELECT on `allowed_dataset` tables."""
+def validate_select(
+    sql: str, allowed_dataset: str = "marts", allowed_project: str | None = None
+) -> None:
+    """Raise GuardError unless `sql` is one read-only SELECT on `allowed_dataset` tables.
+
+    When `allowed_project` is given, tables must also live in that project (or omit it).
+    """
     if re.search(r";\s*\S", clean_sql(sql)):
         raise GuardError("Only a single SQL statement is allowed.")
     try:
@@ -77,12 +83,13 @@ def validate_select(sql: str, allowed_dataset: str = "marts") -> None:
     cte_names = {cte.alias_or_name for cte in root.find_all(exp.CTE)}
     tables = [node for node in nodes if isinstance(node, exp.Table)]
     for table in tables:
-        if table.db == allowed_dataset:
-            continue
-        if not table.db and table.name in cte_names:
+        if not table.db and not table.catalog and table.name in cte_names:
             continue
         name = ".".join(part.name for part in table.parts)
-        raise GuardError(f"Table `{name}` is outside the `{allowed_dataset}` dataset.")
+        if table.db != allowed_dataset:
+            raise GuardError(f"Table `{name}` is outside the `{allowed_dataset}` dataset.")
+        if allowed_project is not None and table.catalog not in ("", allowed_project):
+            raise GuardError(f"Table `{name}` is outside the `{allowed_project}` project.")
 
     if any(table.name == "fct_trips" for table in tables):
         has_filter = any(
@@ -101,7 +108,10 @@ def estimate_cost_usd(bytes_: int) -> float:
 def dry_run(client: bigquery.Client, sql: str) -> int:
     """Return the bytes BigQuery would scan for `sql`, without running it."""
     config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
-    return client.query(sql, job_config=config).total_bytes_processed or 0
+    try:
+        return client.query(sql, job_config=config).total_bytes_processed or 0
+    except GoogleAPICallError as exc:
+        raise GuardError(f"BigQuery rejected the query: {exc.message}") from exc
 
 
 def blocked_reason(bytes_scanned: int, limit_bytes: int = LIMIT_BYTES) -> str:
@@ -116,11 +126,17 @@ def blocked_reason(bytes_scanned: int, limit_bytes: int = LIMIT_BYTES) -> str:
 def guarded_run(
     client: bigquery.Client, sql: str, limit_bytes: int = LIMIT_BYTES
 ) -> GuardResult:
-    """Dry-run `sql`; block it when it would scan more than `limit_bytes`, else execute it."""
+    """Dry-run `sql`; block it when it would scan more than `limit_bytes`, else execute it.
+
+    BigQuery API errors from either call are raised as GuardError.
+    """
     scanned = dry_run(client, sql)
     cost = estimate_cost_usd(scanned)
     if scanned > limit_bytes:
         return GuardResult(True, scanned, cost, blocked_reason(scanned, limit_bytes), None)
     config = bigquery.QueryJobConfig(maximum_bytes_billed=limit_bytes)
-    df = client.query(sql, job_config=config).to_dataframe()
+    try:
+        df = client.query(sql, job_config=config).to_dataframe()
+    except GoogleAPICallError as exc:
+        raise GuardError(f"BigQuery rejected the query: {exc.message}") from exc
     return GuardResult(False, scanned, cost, None, df)

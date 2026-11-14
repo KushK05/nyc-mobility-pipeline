@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 import yaml
+from google.api_core.exceptions import BadRequest, Forbidden
 from google.cloud import bigquery
 
 from chatbot import guard, llm
@@ -237,3 +238,36 @@ def test_complete_raises_on_refusal(fake_anthropic):
     fake_anthropic.stop_reason = "refusal"
     with pytest.raises(RuntimeError, match="model refused"):
         llm.complete("s", "u")
+
+
+def test_project_pinning():
+    other = "SELECT * FROM `bigquery-public-data.marts.dim_zone`"
+    validate_select(other)  # no project pinned: dataset rule only
+    with pytest.raises(GuardError, match="outside the `p` project"):
+        validate_select(other, allowed_project="p")
+    with pytest.raises(GuardError, match="outside the `p` project"):
+        validate_select(
+            "SELECT * FROM `p.marts.dim_zone` z JOIN `q.marts.dim_date` d ON true",
+            allowed_project="p",
+        )
+    validate_select("SELECT * FROM `p.marts.dim_zone`", allowed_project="p")
+    validate_select("SELECT * FROM marts.dim_zone", allowed_project="p")
+    validate_select(
+        "WITH c AS (SELECT * FROM `p.marts.dim_zone`) SELECT * FROM c", allowed_project="p"
+    )
+
+
+def test_dry_run_wraps_bigquery_errors():
+    client = MagicMock(spec=bigquery.Client)
+    client.query.side_effect = BadRequest("Unrecognized name: foo")
+    with pytest.raises(GuardError, match="BigQuery rejected the query: Unrecognized name: foo"):
+        guarded_run(client, WEATHER)
+
+
+def test_guarded_run_wraps_execution_errors():
+    client = MagicMock(spec=bigquery.Client)
+    failing = MagicMock()
+    failing.to_dataframe.side_effect = Forbidden("Query exceeded limit for bytes billed")
+    client.query.side_effect = [_job(1024**2), failing]
+    with pytest.raises(GuardError, match="BigQuery rejected the query: Query exceeded"):
+        guarded_run(client, WEATHER)
